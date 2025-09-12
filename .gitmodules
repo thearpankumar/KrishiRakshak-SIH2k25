@@ -1,6 +1,3 @@
-[submodule "krishirakshak-mobile-app"]
-	path = krishirakshak-mobile-app
-	url = https://github.com/codiphile/krishiRakshak.git
 [submodule "krishiRakshak"]
 	path = krishiRakshak
 	url = https://github.com/codiphile/krishiRakshak.git
