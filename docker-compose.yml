@@ -54,19 +54,28 @@ services:
       - n8n-network
 
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16
     container_name: n8n-postgres
     restart: unless-stopped
     environment:
       - POSTGRES_DB=n8n
       - POSTGRES_USER=n8n
       - POSTGRES_PASSWORD=n8npassword
+      # Additional database for FastAPI
+      - POSTGRES_MULTIPLE_DATABASES=krishi_officer
     volumes:
       # Persistent database storage
       - postgres_data:/var/lib/postgresql/data
+      # Init script for creating additional database and extensions
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     ports:
       # Optional: expose PostgreSQL port for direct database access
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U n8n -d n8n"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - n8n-network
 
@@ -83,12 +92,52 @@ services:
     networks:
       - n8n-network
 
+  # Qdrant Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: krishi-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - n8n-network
+
+  # FastAPI Backend Service
+  fastapi:
+    build: .
+    container_name: krishi-fastapi
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://n8n:n8npassword@postgres:5432/krishi_officer
+      - REDIS_URL=redis://:redispassword@redis:6379/1
+      - QDRANT_URL=http://qdrant:6333
+      - SECRET_KEY=your-secret-key-change-in-production
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app
+      - ./uploads:/app/uploads
+    networks:
+      - n8n-network
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
 volumes:
   n8n_data:
     driver: local
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  qdrant_data:
     driver: local
 
 networks:

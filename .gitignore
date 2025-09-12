@@ -6,6 +6,98 @@ dist/
 wheels/
 *.egg-info
 logs/
+.python-version
 
 # Virtual environments
-.venv
+.venv/
+venv/
+env/
+ENV/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# FastAPI/Uvicorn
+*.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Alembic
+# Keep alembic.ini and env.py, but ignore any sensitive migration files if needed
+# alembic/versions/*.py  # Uncomment if you want to ignore migration files
+
+# File uploads
+uploads/
+static/uploads/
+media/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+.tox/
+.testmondata
+
+# Node.js (if any frontend assets)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Redis dump
+dump.rdb
+
+# n8n data (if running locally)
+n8n_data/
+local-files/
+
+# Vector database data
+qdrant_data/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+*.csr
+
+# Backup files
+*.bak
+*.backup
+
+# Cache directories
+.cache/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json

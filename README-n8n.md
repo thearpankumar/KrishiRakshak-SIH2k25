@@ -1,30 +1,54 @@
-# n8n Docker Compose Setup
+# Digital Krishi Officer - Backend Setup
 
-This setup provides a complete n8n automation platform with PostgreSQL database and Redis caching, optimized for local network access.
+This setup provides a complete Digital Krishi Officer backend with n8n automation platform, FastAPI backend, PostgreSQL database, Redis caching, and Qdrant vector database.
 
 ## Services Included
 
-- **n8n**: Main automation platform
-- **PostgreSQL**: Robust database for production use
-- **Redis**: Caching and queue management (optional)
+- **FastAPI**: Main backend API server with AI chat, authentication, and analysis
+- **n8n**: Automation platform for workflows (scheduler, alerts, integrations)
+- **PostgreSQL**: Robust database for production use (with auto-creation of krishi_officer database)
+- **Redis**: Caching and queue management for FastAPI and n8n
+- **Qdrant**: Vector database for semantic search in Q&A system
 
 ## Quick Start
 
 1. **Prepare environment file**:
    ```bash
    cp .env.example .env
-   # Edit .env file with your desired credentials and network settings
+   # Edit .env file with your desired credentials, OpenAI API key, and network settings
    ```
 
-2. **Start the services**:
+2. **Install Python dependencies** (for FastAPI development):
    ```bash
-   docker-compose up -d
+   # Install uv if not already installed
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   
+   # Install project dependencies
+   uv sync
    ```
 
-3. **Access n8n**:
-   - Local access: http://localhost:5678
-   - Network access: http://YOUR_SERVER_IP:5678
-   - Login with credentials from .env file (default: admin/changeme123)
+3. **Start the services**:
+   ```bash
+   # Start all services (PostgreSQL, Redis, Qdrant, n8n, FastAPI)
+   docker-compose up -d
+   
+   # View logs for all services
+   docker-compose logs -f
+   ```
+
+4. **Run database migrations**:
+   ```bash
+   # Run Alembic migrations to create database schema
+   uv run alembic upgrade head
+   ```
+
+5. **Access the services**:
+   - **FastAPI Backend**: http://localhost:8000
+     - API Documentation: http://localhost:8000/docs
+     - Health Check: http://localhost:8000/health
+   - **n8n Workflows**: http://localhost:5678
+     - Login with credentials from .env file (default: admin/changeme123)
+   - **Qdrant Vector DB**: http://localhost:6333/dashboard
 
 ## Network Configuration
 
@@ -45,41 +69,114 @@ This setup provides a complete n8n automation platform with PostgreSQL database 
 ## Directory Structure
 
 ```
+├── app/                    # FastAPI application
+│   ├── api/               # API route handlers
+│   ├── core/              # Core functionality (config, security, database)
+│   ├── models/            # Database models and Pydantic schemas
+│   ├── services/          # Business logic services
+│   └── utils/             # Utility functions
+├── alembic/               # Database migrations
+│   ├── versions/          # Migration files
+│   └── env.py            # Alembic configuration
+├── tests/                 # Unit tests
+├── uploads/               # File upload directory (auto-created)
 ├── docker-compose.yml     # Main compose file
+├── Dockerfile             # FastAPI container build
+├── pyproject.toml         # Python project configuration
+├── init-db.sh            # Database initialization script
 ├── .env                   # Environment configuration
-├── n8n-data/             # n8n persistent data (auto-created)
-├── local-files/          # File sharing directory
+├── .env.example          # Environment template
+├── .gitignore            # Git ignore rules
 └── README-n8n.md         # This file
 ```
 
 ## Security Notes
 
-⚠️ **Important**: Change default passwords in .env file before production use!
+⚠️ **Important**: Change default passwords and add API keys in .env file before use!
 
-- Update N8N_BASIC_AUTH_PASSWORD
-- Update DB_POSTGRES_PASSWORD
-- Update REDIS_PASSWORD
+### Required Configuration:
+- **OPENAI_API_KEY**: Required for AI chat functionality
+- **SECRET_KEY**: Change to a long, random string for JWT security
+- **N8N_BASIC_AUTH_PASSWORD**: Change default n8n login password
+- **DB_POSTGRES_PASSWORD**: Change default database password
+- **REDIS_PASSWORD**: Change default Redis password
 
-## Useful Commands
+### API Endpoints:
+- **Authentication**: `/api/v1/auth/register`, `/api/v1/auth/login`
+- **Chat**: `/api/v1/chat/` (POST for sending messages)
+- **User Profile**: `/api/v1/auth/me`, `/api/v1/auth/profile`
+- **API Documentation**: `/docs` (Swagger UI)
 
+## Development Commands
+
+### FastAPI Development
 ```bash
-# Start services
+# Run FastAPI locally (for development)
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Run database migrations
+uv run alembic upgrade head
+
+# Create new migration after model changes
+uv run alembic revision --autogenerate -m "Description of changes"
+
+# Rollback last migration
+uv run alembic downgrade -1
+
+# Check migration history
+uv run alembic history
+
+# Run tests
+uv run pytest
+
+# Install new package
+uv add package-name
+
+# Remove package
+uv remove package-name
+```
+
+### Docker Commands
+```bash
+# Start all services
 docker-compose up -d
 
-# View logs
+# View logs for specific service
+docker-compose logs -f fastapi
+docker-compose logs -f postgres
 docker-compose logs -f n8n
+docker-compose logs -f qdrant
 
 # Stop services
 docker-compose down
 
+# Restart specific service
+docker-compose restart fastapi
+
+# Rebuild and start
+docker-compose up --build -d
+
 # Update to latest versions
 docker-compose pull && docker-compose up -d
+```
 
-# Backup n8n data
-docker run --rm -v n8n_n8n_data:/data -v $(pwd):/backup alpine tar czf /backup/n8n-backup.tar.gz -C /data .
+### Database Commands
+```bash
+# Connect to PostgreSQL database
+docker exec -it n8n-postgres psql -U n8n -d krishi_officer
 
-# Restore n8n data
-docker run --rm -v n8n_n8n_data:/data -v $(pwd):/backup alpine tar xzf /backup/n8n-backup.tar.gz -C /data
+# Backup database
+docker exec n8n-postgres pg_dump -U n8n krishi_officer > backup.sql
+
+# Restore database
+docker exec -i n8n-postgres psql -U n8n krishi_officer < backup.sql
+
+# Reset database (WARNING: destroys all data)
+docker-compose down
+docker volume rm sih-2025_postgres_data
+docker-compose up -d postgres
+# Wait for postgres to be ready, then run migrations
+uv run alembic upgrade head
 ```
 
 ## Troubleshooting
