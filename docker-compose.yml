@@ -1,0 +1,99 @@
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      # Expose n8n on all network interfaces for local network access
+      - "5678:5678"
+    environment:
+      # Basic Authentication (change these credentials!)
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=changeme123
+      
+      # Database configuration (using PostgreSQL for better performance)
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=n8n
+      - DB_POSTGRESDB_PASSWORD=n8npassword
+      
+      # Network configuration
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      
+      # Webhook configuration for local network access
+      # Replace with your actual server IP for network access
+      - WEBHOOK_URL=http://localhost:5678/
+      
+      # Allow external libraries (useful for custom functions)
+      - NODE_FUNCTION_ALLOW_EXTERNAL=axios,lodash,moment
+      
+      # File system access
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false
+      
+      # Timezone (adjust as needed)
+      - GENERIC_TIMEZONE=America/New_York
+      - TZ=America/New_York
+      
+      # Performance settings
+      - N8N_RUNNERS_ENABLED=true
+      - NODE_ENV=production
+      
+    volumes:
+      # Persistent data storage
+      - n8n_data:/home/node/.n8n
+      # Local files directory for file operations
+      - ./local-files:/files
+    depends_on:
+      - postgres
+    networks:
+      - n8n-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: n8n-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=n8n
+      - POSTGRES_USER=n8n
+      - POSTGRES_PASSWORD=n8npassword
+    volumes:
+      # Persistent database storage
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # Optional: expose PostgreSQL port for direct database access
+      - "5432:5432"
+    networks:
+      - n8n-network
+
+  # Optional: Redis for caching and queue management (useful for high-load scenarios)
+  redis:
+    image: redis:7-alpine
+    container_name: n8n-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass redispassword
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - n8n-network
+
+volumes:
+  n8n_data:
+    driver: local
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  n8n-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
