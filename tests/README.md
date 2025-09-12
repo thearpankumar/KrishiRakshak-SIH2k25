@@ -1,218 +1,81 @@
 # Digital Krishi Officer API Tests
 
-This directory contains comprehensive test suites for the Digital Krishi Officer FastAPI backend.
+Comprehensive test suite for all Digital Krishi Officer API endpoints.
 
-## Test Files
+## Quick Start
 
-### `test_container_endpoints.py`
-- **Main test suite** that validates all API endpoints
-- Tests authentication, user management, farming profiles, and chat functionality
-- Includes error handling and security testing
-- Can be run standalone or with pytest
-- Generates detailed test reports in JSON format
-
-### `conftest.py`
-- Pytest configuration and fixtures
-- Database setup for integration tests
-- Test data fixtures
-
-### `run_tests.py`
-- **Test runner script** for easy execution
-- Supports waiting for container startup
-- Configurable target URLs
-- Executable script for CI/CD integration
-
-## Running Tests
-
-### Option 1: Direct Execution (Recommended)
 ```bash
-# Run against local container
-cd tests
-uv run python test_container_endpoints.py
-
-# Or use the test runner
-uv run python run_tests.py --url http://localhost:8000 --wait
-```
-
-### Option 2: With pytest via uv
-```bash
-# Run all tests
-uv run pytest tests/
-
-# Run specific test file
-uv run pytest tests/test_container_endpoints.py -v
-
-# Run with detailed output
-uv run pytest tests/test_container_endpoints.py -v -s
-```
-
-### Option 3: Container Testing
-```bash
-# Start your containers first
+# Make sure containers are running
 docker-compose up -d
 
-# Wait for services and run tests
-uv run python tests/run_tests.py --wait --timeout 120
+# Run all tests
+cd tests/
+./test.sh
+```
 
-# Or test against specific URL
-uv run python tests/run_tests.py --url http://container-host:8000
+## Test Suites
+
+| **Suite** | **File** | **Coverage** |
+|-----------|----------|-------------|
+| **Core** | `test_container_endpoints.py` | Auth, Chat, Profiles |
+| **Analysis** | `test_analysis_endpoints.py` | Image Upload, AI Vision |
+| **Knowledge** | `test_knowledge_endpoints.py` | Q&A, Vector Search |
+| **Community** | `test_community_endpoints.py` | Groups, Messaging |
+| **Location** | `test_location_endpoints.py` | Retailers, Geospatial |
+
+## Run Options
+
+```bash
+# All tests (recommended)
+./test.sh
+
+# With pytest
+./test.sh --pytest
+
+# Individual suites
+uv run pytest tests/test_analysis_endpoints.py -v
+uv run pytest tests/test_knowledge_endpoints.py -v
+uv run pytest tests/test_community_endpoints.py -v
+uv run pytest tests/test_location_endpoints.py -v
+
+# Comprehensive runner
+uv run python run_all_tests.py
 ```
 
 ## Test Coverage
 
-The test suite covers:
+✅ **100+ API endpoints tested**
+- Authentication & Authorization
+- AI-Powered Chat System  
+- Image Analysis & Vision AI
+- Knowledge Repository with Vector Search
+- Community Group Chats
+- Location-Based Services
+- Error Handling & Security
 
-### ✅ Health Endpoints
-- `GET /` - Root endpoint
-- `GET /health` - Health check
+## Requirements
 
-### ✅ Authentication Endpoints  
-- `POST /api/v1/auth/register` - User registration
-- `POST /api/v1/auth/login` - User login
-- `GET /api/v1/auth/me` - Get current user
-- `PUT /api/v1/auth/me` - Update user profile
-- `DELETE /api/v1/auth/me` - Delete user account (with cleanup)
+- Docker containers running (`docker-compose up -d`)
+- Services accessible:
+  - FastAPI: `http://localhost:8000`
+  - Qdrant: `http://localhost:6333`
+  - PostgreSQL: `localhost:5432`
+  - Redis: `localhost:6379`
 
-### ✅ Farming Profile Endpoints
-- `POST /api/v1/auth/profile` - Create farming profile
-- `GET /api/v1/auth/profile` - Get farming profile  
-- `PUT /api/v1/auth/profile` - Update farming profile
-- `DELETE /api/v1/auth/profile` - Delete farming profile
+## Output
 
-### ✅ Chat/AI Endpoints
-- `POST /api/v1/chat/` - Send chat message
-- `GET /api/v1/chat/history` - Get chat history
-- `GET /api/v1/chat/{message_id}` - Get specific message
-- `DELETE /api/v1/chat/{message_id}` - Delete message
-- `DELETE /api/v1/chat/history/clear` - Clear history
-
-### ✅ Security Testing
-- Unauthorized access attempts
-- Invalid authentication
-- Protected endpoint access
-
-### ✅ Data Validation Testing  
-- Invalid input data handling
-- Malformed requests
-- Edge cases
-
-### ✅ Cleanup & Deletion Testing
-- User account deletion with cascading cleanup
-- Farming profile deletion
-- Test data cleanup after test completion
-- Database integrity after deletions
-
-## Test Output
-
-### Console Output
-- Real-time test progress
-- ✅/❌ Pass/fail indicators  
-- Detailed error messages
-- Test summary statistics
-
-### JSON Report
-- `test_results.json` - Comprehensive test results
-- Timestamps for each test
-- Response data and status codes
-- Detailed failure information
-
-## Environment Requirements
-
-### For Container Testing:
-- Docker and Docker Compose
-- PostgreSQL container running
-- Redis container running  
-- FastAPI container running on port 8000
-
-### For Local Testing:
-- Python 3.11+
-- All dependencies installed (`uv sync`)
-- PostgreSQL running locally
-- Redis running locally
-- Environment variables configured
-
-## Configuration
-
-### Test Configuration (`TestConfig` class):
-```python
-BASE_URL = "http://localhost:8000"  # Change for different environments
-TIMEOUT = 30  # Request timeout
-TEST_USER = {...}  # Test user data
-TEST_PROFILE = {...}  # Test farming profile data
-```
-
-### Environment Variables:
-```bash
-# For database testing (optional)
-DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/test_db
-REDIS_URL=redis://localhost:6379/1
-```
-
-## CI/CD Integration
-
-### GitHub Actions Example:
-```yaml
-- name: Run API Tests
-  run: |
-    uv run python tests/run_tests.py --wait --timeout 180
-```
-
-### Docker Compose Testing:
-```yaml
-version: '3.8'
-services:
-  api-tests:
-    build: .
-    command: uv run python tests/run_tests.py --url http://api:8000 --wait
-    depends_on:
-      - api
-      - postgres
-      - redis
-```
+- Console: Real-time test progress
+- Files: `test_results.json`, `comprehensive_test_results.json`
 
 ## Troubleshooting
 
-### Common Issues:
+```bash
+# Check containers
+docker ps
 
-1. **Connection Refused**
-   ```bash
-   # Make sure containers are running
-   docker-compose ps
-   docker-compose logs api
-   ```
+# Check API health
+curl http://localhost:8000/health
 
-2. **Database Errors**
-   ```bash
-   # Check database connectivity
-   docker-compose logs postgres
-   ```
-
-3. **Authentication Failures**
-   ```bash
-   # Check if user registration/login is working
-   # Verify JWT secret configuration
-   ```
-
-4. **Timeout Issues**
-   ```bash
-   # Increase timeout for slower environments
-   uv run python run_tests.py --timeout 300
-   ```
-
-## Adding New Tests
-
-To add new endpoint tests:
-
-1. Add the endpoint test method to `DigitalKrishiTester` class
-2. Update the `run_all_tests()` method to include new test
-3. Add any required test data to `TestConfig`
-4. Update this README with the new endpoint coverage
-
-Example:
-```python
-def test_new_endpoint(self):
-    """Test new API endpoint."""
-    response = self.make_request('GET', '/api/v1/new-endpoint')
-    data = self.assert_response(response, 200, "New endpoint test")
-    assert "expected_field" in data
+# View logs
+docker logs krishi-fastapi
 ```

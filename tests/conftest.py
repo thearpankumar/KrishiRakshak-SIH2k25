@@ -111,3 +111,54 @@ def test_chat_data():
         "message": "What crops should I grow in this season?",
         "message_type": "text"
     }
+
+
+@pytest.fixture
+def test_qa_data():
+    """Test Q&A repository data fixture."""
+    return {
+        "question": "What is the best fertilizer for rice crops?",
+        "answer": "NPK fertilizer with 4:2:1 ratio works well for rice crops in Kerala.",
+        "crop_type": "rice",
+        "category": "fertilizer",
+        "language": "english"
+    }
+
+
+@pytest.fixture
+def test_group_data():
+    """Test group chat data fixture."""
+    return {
+        "name": "Rice Farmers Test Group",
+        "description": "Test group for rice farmers",
+        "crop_type": "rice",
+        "location": "Kerala"
+    }
+
+
+@pytest.fixture
+def test_retailer_data():
+    """Test retailer data fixture."""
+    return {
+        "name": "Test Agricultural Store",
+        "contact_person": "Test Owner",
+        "phone_number": "+91-9876543210",
+        "email": "test@teststore.com",
+        "address": "Test Address, Kerala",
+        "latitude": 10.0,
+        "longitude": 76.0,
+        "services": ["seeds", "fertilizers", "tools"]
+    }
+
+
+@pytest.fixture
+def test_coordinates():
+    """Test coordinates fixture for location testing."""
+    return {
+        "kerala_lat": 10.8505,
+        "kerala_lng": 76.2711,
+        "kochi_lat": 9.9312,
+        "kochi_lng": 76.2673,
+        "trivandrum_lat": 8.5241,
+        "trivandrum_lng": 76.9366
+    }

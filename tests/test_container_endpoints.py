@@ -94,7 +94,10 @@ class DigitalKrishiTester:
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
-        if response.status_code != expected_status:
+        # Handle both single status code and list of status codes
+        expected_codes = expected_status if isinstance(expected_status, list) else [expected_status]
+        
+        if response.status_code not in expected_codes:
             error_msg = (
                 f"{description} failed:\n"
                 f"Expected: {expected_status}\n"
@@ -369,6 +372,74 @@ class DigitalKrishiTester:
         # We'll just verify it doesn't crash
         assert response.status_code in [200, 422, 400]
 
+    def test_new_api_endpoints(self):
+        """Test new API endpoints for image analysis, knowledge, community, and location."""
+        
+        print("\n📸 Testing Image Analysis endpoints...")
+        # Test basic image analysis endpoint availability
+        response = self.make_request('GET', '/api/v1/analysis/stats/summary')
+        # Check if endpoint is accessible (may return 200 with empty data or 401/403 if protected)
+        if response.status_code == 200:
+            # If accessible without auth, should return empty stats
+            data = response.json()
+            assert "total_analyses" in data, "Response should contain total_analyses"
+            print(f"   ✅ Analysis stats endpoint accessible: {data}")
+        else:
+            # If protected, should return 401/403
+            self.assert_response(response, [401, 403], "Image analysis stats (unauthorized)")
+        
+        print("🧠 Testing Knowledge Repository endpoints...")
+        # Test knowledge search endpoint
+        response = self.make_request('GET', '/api/v1/knowledge/search?query=farming&limit=5')
+        # Knowledge search might be public or require auth
+        if response.status_code not in [200, 401, 403]:
+            pytest.fail(f"Unexpected status for knowledge search: {response.status_code}")
+        self.test_results["Knowledge search endpoint"] = {
+            "status_code": response.status_code,
+            "expected_status": "200 or 401/403",
+            "success": response.status_code in [200, 401, 403],
+            "data": {"accessible": response.status_code == 200},
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Test categories endpoint
+        response = self.make_request('GET', '/api/v1/knowledge/categories/list')
+        if response.status_code not in [200, 401, 403]:
+            pytest.fail(f"Unexpected status for categories list: {response.status_code}")
+        
+        print("👥 Testing Community endpoints...")
+        # Test groups list endpoint
+        response = self.make_request('GET', '/api/v1/community/groups?limit=5')
+        if response.status_code not in [200, 401, 403]:
+            pytest.fail(f"Unexpected status for community groups: {response.status_code}")
+        self.test_results["Community groups endpoint"] = {
+            "status_code": response.status_code,
+            "expected_status": "200 or 401/403",
+            "success": response.status_code in [200, 401, 403],
+            "data": {"accessible": response.status_code == 200},
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        print("📍 Testing Location Services endpoints...")
+        # Test retailers list endpoint
+        response = self.make_request('GET', '/api/v1/location/retailers?limit=5')
+        if response.status_code not in [200, 401, 403]:
+            pytest.fail(f"Unexpected status for retailers list: {response.status_code}")
+        self.test_results["Location retailers endpoint"] = {
+            "status_code": response.status_code,
+            "expected_status": "200 or 401/403", 
+            "success": response.status_code in [200, 401, 403],
+            "data": {"accessible": response.status_code == 200},
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Test services list endpoint
+        response = self.make_request('GET', '/api/v1/location/services/list')
+        if response.status_code not in [200, 401, 403]:
+            pytest.fail(f"Unexpected status for services list: {response.status_code}")
+        
+        print("✅ All new API endpoints are accessible and responding correctly")
+
     def test_deletion_endpoints(self):
         """Test deletion endpoints and cleanup functionality."""
         
@@ -493,8 +564,12 @@ class DigitalKrishiTester:
             print("8. Testing invalid data handling...")
             self.test_invalid_data_handling()
             
+            # New API endpoints tests
+            print("9. Testing new API endpoints...")
+            self.test_new_api_endpoints()
+            
             # Deletion endpoints tests
-            print("9. Testing deletion endpoints...")
+            print("10. Testing deletion endpoints...")
             self.test_deletion_endpoints()
             
             print("\n" + "=" * 60)

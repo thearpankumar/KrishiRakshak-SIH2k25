@@ -1,66 +1,57 @@
 #!/bin/bash
 
-# Digital Krishi Officer API Test Runner using uv
-# Usage: ./test.sh [options]
+# Comprehensive Digital Krishi Officer API Test Runner
+# This script runs all test suites for the complete application
 
 set -e
-
-# Default values
-URL="http://localhost:8000"
-WAIT=false
-TIMEOUT=120
-VERBOSE=false
 
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 print_usage() {
-    echo "Digital Krishi Officer API Test Runner"
+    echo -e "${BLUE}🧪 Digital Krishi Officer API - Comprehensive Test Runner${NC}"
     echo ""
     echo "Usage: $0 [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  -u, --url URL       Base URL for API (default: http://localhost:8000)"
-    echo "  -w, --wait          Wait for service to be ready"
-    echo "  -t, --timeout SEC   Timeout in seconds (default: 120)"
-    echo "  -v, --verbose       Verbose output"
-    echo "  -p, --pytest        Use pytest instead of direct execution"
-    echo "  -h, --help          Show this help message"
+    echo "  --pytest         Use pytest to run individual test modules"
+    echo "  --comprehensive  Run comprehensive test suite (default)"
+    echo "  --help          Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0                              # Quick test run"
-    echo "  $0 --wait --timeout 180        # Wait for container startup"
-    echo "  $0 --url http://myapi:8000     # Test against different URL"
-    echo "  $0 --pytest --verbose          # Run with pytest"
+    echo "  $0                      # Run comprehensive test suite"
+    echo "  $0 --pytest           # Run with pytest"
+    echo ""
+    echo "Test Suites Included:"
+    echo "  ✅ Core Functionality (Auth, Chat, Profiles)"
+    echo "  ✅ Image Analysis (Upload, AI Vision, Analysis)"
+    echo "  ✅ Knowledge Repository (Q&A, Vector Search)"
+    echo "  ✅ Community Features (Groups, Messages)"
+    echo "  ✅ Location Services (Retailers, Geospatial)"
 }
+
+# Default mode
+USE_PYTEST=false
+USE_COMPREHENSIVE=true
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -u|--url)
-            URL="$2"
-            shift 2
-            ;;
-        -w|--wait)
-            WAIT=true
-            shift
-            ;;
-        -t|--timeout)
-            TIMEOUT="$2"
-            shift 2
-            ;;
-        -v|--verbose)
-            VERBOSE=true
-            shift
-            ;;
-        -p|--pytest)
+        --pytest)
             USE_PYTEST=true
+            USE_COMPREHENSIVE=false
             shift
             ;;
-        -h|--help)
+        --comprehensive)
+            USE_COMPREHENSIVE=true
+            USE_PYTEST=false
+            shift
+            ;;
+        --help)
             print_usage
             exit 0
             ;;
@@ -72,9 +63,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo -e "${GREEN}🧪 Digital Krishi Officer API Test Runner${NC}"
-echo -e "${YELLOW}🎯 Target URL: $URL${NC}"
-echo ""
+echo -e "${BLUE}🚀 Digital Krishi Officer API - Comprehensive Test Runner${NC}"
+echo "=" * 60
 
 # Check if uv is available
 if ! command -v uv &> /dev/null; then
@@ -89,41 +79,46 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
 echo -e "${YELLOW}📁 Working directory: $(pwd)${NC}"
+echo -e "${YELLOW}🎯 Target API: http://localhost:8000${NC}"
+echo ""
 
 if [[ "$USE_PYTEST" == "true" ]]; then
     echo -e "${YELLOW}🔬 Running tests with pytest...${NC}"
-    
-    if [[ "$VERBOSE" == "true" ]]; then
-        uv run pytest tests/test_container_endpoints.py -v -s
-    else
-        uv run pytest tests/test_container_endpoints.py
-    fi
-    
-else
-    echo -e "${YELLOW}🚀 Running tests directly...${NC}"
-    
-    # Build command
-    CMD="uv run python tests/run_tests.py --url $URL"
-    
-    if [[ "$WAIT" == "true" ]]; then
-        CMD="$CMD --wait --timeout $TIMEOUT"
-    fi
-    
-    echo -e "${YELLOW}⚡ Command: $CMD${NC}"
     echo ""
     
-    # Execute the command
-    eval $CMD
+    # Run each test module with pytest
+    test_modules=(
+        "tests/test_container_endpoints.py"
+        "tests/test_analysis_endpoints.py"
+        "tests/test_knowledge_endpoints.py"
+        "tests/test_community_endpoints.py"
+        "tests/test_location_endpoints.py"
+    )
+    
+    for module in "${test_modules[@]}"; do
+        echo -e "${BLUE}Running $module...${NC}"
+        uv run pytest "$module" -v
+        echo ""
+    done
+    
+else
+    echo -e "${YELLOW}🚀 Running comprehensive test suite...${NC}"
+    echo ""
+    
+    # Run comprehensive test runner
+    uv run python tests/run_all_tests.py
 fi
 
 RESULT=$?
 
 if [[ $RESULT -eq 0 ]]; then
     echo ""
-    echo -e "${GREEN}✅ All tests completed successfully!${NC}"
+    echo -e "${GREEN}🎉 ALL TESTS COMPLETED SUCCESSFULLY!${NC}"
+    echo -e "${GREEN}✅ Your Digital Krishi Officer API is fully functional and ready for production!${NC}"
 else
     echo ""
-    echo -e "${RED}❌ Some tests failed! (Exit code: $RESULT)${NC}"
+    echo -e "${RED}❌ SOME TESTS FAILED! (Exit code: $RESULT)${NC}"
+    echo -e "${YELLOW}💡 Please review the test output above for details.${NC}"
 fi
 
 exit $RESULT
