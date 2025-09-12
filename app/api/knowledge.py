@@ -55,7 +55,7 @@ async def search_knowledge(
     query: str = Query(..., min_length=3),
     crop_type: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
-    language: Optional[str] = Query("malayalam"),
+    language: Optional[str] = Query("english"),
     limit: int = Query(10, ge=1, le=50),
     use_vector_search: bool = Query(True),
     current_user: User = Depends(get_current_active_user),
@@ -347,7 +347,7 @@ async def vote_qa_entry(
 async def ask_ai_question(
     question: str = Query(..., min_length=10),
     crop_type: Optional[str] = Query(None),
-    language: str = Query("malayalam"),
+    language: str = Query("english"),
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_session)
 ):

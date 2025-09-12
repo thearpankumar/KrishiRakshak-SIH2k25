@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, func, text
+from sqlalchemy import select, desc, func, text, String
 from typing import List, Optional
 import math
 
@@ -117,6 +117,8 @@ async def get_nearby_retailers(
             retailers.append(retailer)
         
     except Exception:
+        # Rollback the failed transaction before fallback
+        await session.rollback()
         # Fallback to Python-based distance calculation
         result = await session.execute(select(Retailer))
         all_retailers = result.scalars().all()
@@ -124,6 +126,13 @@ async def get_nearby_retailers(
         retailers_with_distance = []
         
         for retailer in all_retailers:
+            # Apply filters first
+            if is_verified is not None and retailer.is_verified != is_verified:
+                continue
+                
+            if services and not (retailer.services and any(service in retailer.services for service in services)):
+                continue
+            
             distance = calculate_distance(
                 latitude, longitude,
                 retailer.latitude, retailer.longitude
@@ -148,21 +157,21 @@ async def get_nearby_retailers(
                 }
                 retailers_with_distance.append(RetailerWithDistance(**retailer_dict))
         
-        # Sort by distance
+        # Sort by distance and apply limit
         retailers_with_distance.sort(key=lambda x: x.distance or float('inf'))
         retailers = retailers_with_distance[:limit]
-    
-    # Filter by services if specified
-    if services:
-        filtered_retailers = []
-        for retailer in retailers:
-            if retailer.services and any(service in retailer.services for service in services):
-                filtered_retailers.append(retailer)
-        retailers = filtered_retailers
-    
-    # Filter by verification status if specified
-    if is_verified is not None:
-        retailers = [r for r in retailers if r.is_verified == is_verified]
+    else:
+        # Apply filters after PostGIS query if needed
+        if services:
+            filtered_retailers = []
+            for retailer in retailers:
+                if retailer.services and any(service in retailer.services for service in services):
+                    filtered_retailers.append(retailer)
+            retailers = filtered_retailers
+        
+        # Filter by verification status if specified
+        if is_verified is not None:
+            retailers = [r for r in retailers if r.is_verified == is_verified]
     
     return retailers
 
@@ -184,11 +193,12 @@ async def get_retailers(
     
     # Filter by services - this would need to be adapted based on how services are stored
     if services:
-        # Assuming services is stored as a JSON array
+        # Use simple approach - check if the service string appears in the JSON array
         service_conditions = []
         for service in services:
+            # Use LIKE operator to check if service is contained in the JSON text
             service_conditions.append(
-                func.json_array_contains(Retailer.services, service)
+                Retailer.services.cast(String).contains(f'"{service}"')
             )
         if service_conditions:
             from sqlalchemy import or_

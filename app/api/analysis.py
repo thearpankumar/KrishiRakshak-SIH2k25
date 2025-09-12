@@ -282,7 +282,7 @@ async def get_analysis_stats(
     
     # Get total analyses by type
     result = await session.execute(
-        select(ImageAnalysis.analysis_type, ImageAnalysis.id)
+        select(ImageAnalysis.analysis_type, ImageAnalysis.id, ImageAnalysis.created_at)
         .where(ImageAnalysis.user_id == current_user.id)
     )
     
@@ -296,7 +296,7 @@ async def get_analysis_stats(
             "disease": 0,
             "soil": 0
         },
-        "recent_analyses": len([a for a in analyses if (datetime.utcnow() - a.created_at).days <= 7]) if analyses else 0
+        "recent_analyses": len([a for a in analyses if (datetime.now().replace(tzinfo=None) - a.created_at.replace(tzinfo=None)).days <= 7]) if analyses else 0
     }
     
     for analysis in analyses:
