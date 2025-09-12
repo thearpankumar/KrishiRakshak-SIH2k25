@@ -4,6 +4,8 @@ from ..core.config import settings
 from ..models.database import User, UserProfile
 import json
 import asyncio
+import base64
+from .vector_service import vector_service
 
 class AIService:
     def __init__(self):
@@ -27,10 +29,10 @@ class AIService:
         
         try:
             if message_type == "text":
-                response = await self._process_text_message(message, context, system_prompt)
+                response = await self._process_text_message(message, context, system_prompt, user_profile)
             elif message_type == "voice":
                 # For now, treat voice as text (would need speech-to-text integration)
-                response = await self._process_text_message(message, context, system_prompt)
+                response = await self._process_text_message(message, context, system_prompt, user_profile)
             elif message_type == "image":
                 response = await self._process_image_message(message, context, system_prompt)
             else:
@@ -43,7 +45,8 @@ class AIService:
                 "response": response["content"],
                 "trust_score": trust_score,
                 "tips": response.get("tips", []),
-                "recommendations": response.get("recommendations", [])
+                "recommendations": response.get("recommendations", []),
+                "similar_questions": response.get("similar_questions", [])
             }
             
         except Exception as e:
@@ -51,27 +54,56 @@ class AIService:
                 "response": self._get_error_message(str(e), language),
                 "trust_score": 0.0,
                 "tips": [],
-                "recommendations": []
+                "recommendations": [],
+                "similar_questions": []
             }
     
     async def _process_text_message(
         self, 
         message: str, 
         context: str, 
-        system_prompt: str
+        system_prompt: str,
+        user_profile: Optional[UserProfile] = None
     ) -> Dict[str, Any]:
-        """Process text message using OpenAI."""
+        """Process text message using OpenAI with vector search enhancement."""
+        
+        # First, try to find similar questions in the knowledge base
+        similar_questions = []
+        try:
+            crop_type = None
+            if user_profile and user_profile.crops_grown:
+                crop_type = user_profile.crops_grown[0] if user_profile.crops_grown else None
+            
+            language = user_profile.preferred_language if user_profile else "malayalam"
+            
+            similar_questions = await vector_service.search_similar_questions(
+                query=message,
+                crop_type=crop_type,
+                language=language,
+                limit=3,
+                similarity_threshold=0.7
+            )
+        except Exception as e:
+            print(f"Vector search failed: {e}")
+        
+        # Enhance context with similar Q&A if found
+        enhanced_context = context
+        if similar_questions:
+            qa_context = "\n\nRelated Q&A from knowledge base:\n"
+            for i, qa in enumerate(similar_questions[:2], 1):
+                qa_context += f"{i}. Q: {qa['question']}\n   A: {qa['answer'][:200]}...\n"
+            enhanced_context += qa_context
         
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Context: {context}\n\nQuestion: {message}"}
+            {"role": "user", "content": f"Context: {enhanced_context}\n\nQuestion: {message}"}
         ]
         
         response = await self.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
             temperature=0.7,
-            max_tokens=500
+            max_tokens=800
         )
         
         content = response.choices[0].message.content
@@ -80,7 +112,8 @@ class AIService:
             "content": content,
             "confidence": 0.85,  # Default confidence for text responses
             "tips": self._extract_tips_from_response(content),
-            "recommendations": self._extract_recommendations_from_response(content)
+            "recommendations": self._extract_recommendations_from_response(content),
+            "similar_questions": similar_questions[:2]  # Return top 2 similar questions
         }
     
     async def _process_image_message(
@@ -89,16 +122,59 @@ class AIService:
         context: str, 
         system_prompt: str
     ) -> Dict[str, Any]:
-        """Process image message using OpenAI Vision."""
+        """Process image message using OpenAI Vision API."""
         
-        # For now, return a placeholder response
-        # In production, you would integrate with OpenAI Vision API
-        return {
-            "content": "Image analysis feature will be implemented with OpenAI Vision API.",
-            "confidence": 0.5,
-            "tips": [],
-            "recommendations": []
-        }
+        try:
+            # Read and encode image to base64
+            with open(image_path, "rb") as image_file:
+                image_data = base64.b64encode(image_file.read()).decode('utf-8')
+            
+            messages = [
+                {
+                    "role": "system",
+                    "content": system_prompt + "\n\nAnalyze the provided image and give detailed agricultural advice."
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Context: {context}\n\nPlease analyze this agricultural image and provide detailed insights and recommendations."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_data}",
+                                "detail": "high"
+                            }
+                        }
+                    ]
+                }
+            ]
+            
+            response = await self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                max_tokens=800,
+                temperature=0.3
+            )
+            
+            content = response.choices[0].message.content
+            
+            return {
+                "content": content,
+                "confidence": 0.8,  # Good confidence for vision analysis
+                "tips": self._extract_tips_from_response(content),
+                "recommendations": self._extract_recommendations_from_response(content)
+            }
+            
+        except Exception as e:
+            return {
+                "content": f"Unable to analyze the image at this time. Error: {str(e)}",
+                "confidence": 0.0,
+                "tips": [],
+                "recommendations": []
+            }
     
     async def _build_user_context(
         self, 
