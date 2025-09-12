@@ -179,6 +179,13 @@ docker-compose up -d postgres
 uv run alembic upgrade head
 ```
 
+---
+### Mobile app start 
+```
+ git submodule update --init --recursive
+```
+---
+
 ## Troubleshooting
 
 ### Can't access from network
