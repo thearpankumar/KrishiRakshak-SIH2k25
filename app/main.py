@@ -10,6 +10,7 @@ import os
 
 from .core.config import settings
 from .core.database import create_tables
+from .services.vector_service import vector_service
 
 
 # Create upload directory early
@@ -26,6 +27,13 @@ async def lifespan(app: FastAPI):
     
     # Initialize Redis connection
     app.state.redis = redis.from_url(settings.redis_url)
+    
+    # Initialize Vector Database
+    try:
+        await vector_service.initialize()
+        print("✅ Vector database initialized successfully")
+    except Exception as e:
+        print(f"⚠️  Vector database initialization failed: {e}")
     
     yield
     
@@ -57,12 +65,13 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 # Include routers
-from .api import auth, chat
+from .api import auth, chat, analysis, community, location, knowledge
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
-# app.include_router(analysis.router, prefix="/api/v1/analysis", tags=["analysis"])
-# app.include_router(community.router, prefix="/api/v1/community", tags=["community"])
-# app.include_router(location.router, prefix="/api/v1/location", tags=["location"])
+app.include_router(analysis.router, prefix="/api/v1/analysis", tags=["analysis"])
+app.include_router(community.router, prefix="/api/v1/community", tags=["community"])
+app.include_router(location.router, prefix="/api/v1/location", tags=["location"])
+app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
 
 @app.get("/")
 async def root():
