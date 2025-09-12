@@ -28,8 +28,9 @@ WORKDIR /app
 # Copy dependency files first for better layer caching
 COPY pyproject.toml uv.lock ./
 
-# Install uv
+# Install uv and add to PATH
 RUN pip install --no-cache-dir uv
+ENV PATH="/root/.local/bin:$PATH"
 
 # Install dependencies
 RUN uv sync --frozen --no-dev
@@ -43,5 +44,5 @@ RUN mkdir -p uploads
 # Expose port
 EXPOSE 8000
 
-# Default command
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Default command - use python -m to run uvicorn
+CMD ["uv", "run", "python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
