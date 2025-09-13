@@ -65,13 +65,14 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 # Include routers
-from .api import auth, chat, analysis, community, location, knowledge
+from .api import auth, chat, analysis, community, location, knowledge, upload
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
 app.include_router(analysis.router, prefix="/api/v1/analysis", tags=["analysis"])
 app.include_router(community.router, prefix="/api/v1/community", tags=["community"])
 app.include_router(location.router, prefix="/api/v1/location", tags=["location"])
 app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
+app.include_router(upload.router, prefix="/api/v1/upload", tags=["upload"])
 
 @app.get("/")
 async def root():

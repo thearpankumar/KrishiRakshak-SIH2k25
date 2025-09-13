@@ -28,8 +28,9 @@ print_usage() {
     echo ""
     echo "Test Suites Included:"
     echo "  ✅ Core Functionality (Auth, Chat, Profiles)"
+    echo "  ✅ Upload Functionality (File Upload, Validation, Security)"
     echo "  ✅ Image Analysis (Upload, AI Vision, Analysis)"
-    echo "  ✅ Knowledge Repository (Q&A, Vector Search)"
+    echo "  ✅ Knowledge Repository (Q&A, Vector Search, Popular Queries)"
     echo "  ✅ Community Features (Groups, Messages)"
     echo "  ✅ Location Services (Retailers, Geospatial)"
 }
@@ -89,6 +90,7 @@ if [[ "$USE_PYTEST" == "true" ]]; then
     # Run each test module with pytest
     test_modules=(
         "tests/test_container_endpoints.py"
+        "tests/test_upload_endpoints.py"
         "tests/test_analysis_endpoints.py"
         "tests/test_knowledge_endpoints.py"
         "tests/test_community_endpoints.py"

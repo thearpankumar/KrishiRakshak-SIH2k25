@@ -73,106 +73,56 @@ async def get_nearby_retailers(
 ):
     """Get nearby retailers based on location."""
     
-    # Use PostgreSQL's built-in earth distance function if available, otherwise use Python calculation
-    try:
-        # Try using PostGIS extension for better performance
-        query = text("""
-            SELECT *, 
-            ST_Distance(
-                ST_Point(:longitude, :latitude)::geography,
-                ST_Point(longitude, latitude)::geography
-            ) / 1000 as distance_km
-            FROM retailers 
-            WHERE ST_DWithin(
-                ST_Point(:longitude, :latitude)::geography,
-                ST_Point(longitude, latitude)::geography,
-                :radius_meters
-            )
-            ORDER BY distance_km
-            LIMIT :limit
-        """)
-        
-        result = await session.execute(
-            query,
-            {
-                "latitude": latitude,
-                "longitude": longitude,
-                "radius_meters": radius_km * 1000,
-                "limit": limit
-            }
+    # Use Python-based distance calculation for reliable results
+    result = await session.execute(select(Retailer))
+    all_retailers = result.scalars().all()
+
+    retailers_with_distance = []
+
+    for retailer in all_retailers:
+        # Apply filters first
+        if is_verified is not None and retailer.is_verified != is_verified:
+            continue
+
+        if services and not (retailer.services and any(service in retailer.services for service in services)):
+            continue
+
+        # Skip retailers without valid coordinates
+        if retailer.latitude is None or retailer.longitude is None:
+            continue
+
+        distance = calculate_distance(
+            latitude, longitude,
+            retailer.latitude, retailer.longitude
         )
-        
-        retailers_data = result.fetchall()
-        
-        # Convert to RetailerWithDistance objects
-        retailers = []
-        for row in retailers_data:
-            retailer_dict = dict(row._mapping)
-            distance = retailer_dict.pop('distance_km', 0)
-            
-            retailer = RetailerWithDistance(
-                **retailer_dict,
-                distance=float(distance) if distance is not None else None
-            )
-            retailers.append(retailer)
-        
-    except Exception:
-        # Rollback the failed transaction before fallback
-        await session.rollback()
-        # Fallback to Python-based distance calculation
-        result = await session.execute(select(Retailer))
-        all_retailers = result.scalars().all()
-        
-        retailers_with_distance = []
-        
-        for retailer in all_retailers:
-            # Apply filters first
-            if is_verified is not None and retailer.is_verified != is_verified:
-                continue
-                
-            if services and not (retailer.services and any(service in retailer.services for service in services)):
-                continue
-            
-            distance = calculate_distance(
-                latitude, longitude,
-                retailer.latitude, retailer.longitude
-            )
-            
-            if distance <= radius_km:
-                retailer_dict = {
-                    "id": retailer.id,
-                    "name": retailer.name,
-                    "contact_person": retailer.contact_person,
-                    "phone_number": retailer.phone_number,
-                    "email": retailer.email,
-                    "address": retailer.address,
-                    "latitude": retailer.latitude,
-                    "longitude": retailer.longitude,
-                    "services": retailer.services,
-                    "rating": retailer.rating,
-                    "is_verified": retailer.is_verified,
-                    "created_at": retailer.created_at,
-                    "updated_at": retailer.updated_at,
-                    "distance": distance
-                }
-                retailers_with_distance.append(RetailerWithDistance(**retailer_dict))
-        
-        # Sort by distance and apply limit
-        retailers_with_distance.sort(key=lambda x: x.distance or float('inf'))
-        retailers = retailers_with_distance[:limit]
-    else:
-        # Apply filters after PostGIS query if needed
-        if services:
-            filtered_retailers = []
-            for retailer in retailers:
-                if retailer.services and any(service in retailer.services for service in services):
-                    filtered_retailers.append(retailer)
-            retailers = filtered_retailers
-        
-        # Filter by verification status if specified
-        if is_verified is not None:
-            retailers = [r for r in retailers if r.is_verified == is_verified]
-    
+
+        if distance <= radius_km:
+            retailer_dict = {
+                "id": retailer.id,
+                "name": retailer.name,
+                "contact_person": retailer.contact_person,
+                "phone_number": retailer.phone_number,
+                "email": retailer.email,
+                "address": retailer.address,
+                "latitude": retailer.latitude,
+                "longitude": retailer.longitude,
+                "services": retailer.services,
+                "rating": retailer.rating,
+                "is_verified": retailer.is_verified,
+                "created_at": retailer.created_at,
+                "updated_at": retailer.updated_at,
+                "distance": distance
+            }
+            retailers_with_distance.append(RetailerWithDistance(**retailer_dict))
+
+    # Sort by distance (primary) and then by ID (secondary) for stable sorting
+    retailers_with_distance.sort(key=lambda x: (x.distance if x.distance is not None else float('inf'), str(x.id)))
+    retailers = retailers_with_distance[:limit]
+
+    # Debug: Print distances for troubleshooting
+    distances = [r.distance for r in retailers]
+    print(f"🔍 DEBUG: Returning distances in order: {distances}")
+
     return retailers
 
 @router.get("/retailers", response_model=List[RetailerSchema])

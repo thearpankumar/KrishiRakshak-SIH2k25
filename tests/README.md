@@ -18,8 +18,9 @@ cd tests/
 | **Suite** | **File** | **Coverage** |
 |-----------|----------|-------------|
 | **Core** | `test_container_endpoints.py` | Auth, Chat, Profiles |
+| **Upload** | `test_upload_endpoints.py` | File Upload, Validation, Security |
 | **Analysis** | `test_analysis_endpoints.py` | Image Upload, AI Vision |
-| **Knowledge** | `test_knowledge_endpoints.py` | Q&A, Vector Search |
+| **Knowledge** | `test_knowledge_endpoints.py` | Q&A, Vector Search, Popular Queries |
 | **Community** | `test_community_endpoints.py` | Groups, Messaging |
 | **Location** | `test_location_endpoints.py` | Retailers, Geospatial |
 
@@ -33,6 +34,7 @@ cd tests/
 ./test.sh --pytest
 
 # Individual suites
+uv run pytest tests/test_upload_endpoints.py -v
 uv run pytest tests/test_analysis_endpoints.py -v
 uv run pytest tests/test_knowledge_endpoints.py -v
 uv run pytest tests/test_community_endpoints.py -v
@@ -44,11 +46,12 @@ uv run python run_all_tests.py
 
 ## Test Coverage
 
-✅ **100+ API endpoints tested**
+✅ **110+ API endpoints tested**
 - Authentication & Authorization
-- AI-Powered Chat System  
+- File Upload & Validation
+- AI-Powered Chat System
 - Image Analysis & Vision AI
-- Knowledge Repository with Vector Search
+- Knowledge Repository with Vector Search & Popular Queries
 - Community Group Chats
 - Location-Based Services
 - Error Handling & Security

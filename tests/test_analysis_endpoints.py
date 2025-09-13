@@ -215,6 +215,124 @@ class TestImageAnalysisEndpoints:
         
         assert result['analysis_type'] == 'soil'
         self.soil_analysis_id = result['id']
+
+    def test_analyze_endpoint_crop_analysis(self):
+        """Test the new /analyze endpoint for crop analysis."""
+
+        test_image = ImageAnalysisTestConfig.create_test_image(
+            width=200, height=200, color=(34, 139, 34)  # Forest green for healthy crop
+        )
+
+        files = {
+            'file': ('test_crop_analyze.jpg', test_image, 'image/jpeg')
+        }
+        data = {
+            'analysis_type': 'crop'
+        }
+
+        response = self._make_authenticated_request(
+            'POST',
+            '/api/v1/analysis/analyze',
+            files=files,
+            data=data
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+
+        assert result['analysis_type'] == 'crop'
+        assert 'confidence_score' in result
+        assert 'results' in result
+        assert 'recommendations' in result
+
+        print(f"✅ /analyze endpoint works for crop analysis: {result['id']}")
+
+    def test_analyze_endpoint_pest_analysis(self):
+        """Test the new /analyze endpoint for pest analysis."""
+
+        test_image = ImageAnalysisTestConfig.create_test_image(
+            width=180, height=180, color=(255, 69, 0)  # Red-orange for pest damage
+        )
+
+        files = {
+            'file': ('test_pest_analyze.jpg', test_image, 'image/jpeg')
+        }
+        data = {
+            'analysis_type': 'pest'
+        }
+
+        response = self._make_authenticated_request(
+            'POST',
+            '/api/v1/analysis/analyze',
+            files=files,
+            data=data
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+
+        assert result['analysis_type'] == 'pest'
+        assert 'confidence_score' in result
+
+        print(f"✅ /analyze endpoint works for pest analysis: {result['id']}")
+
+    def test_analyze_endpoint_disease_analysis(self):
+        """Test the new /analyze endpoint for disease analysis."""
+
+        test_image = ImageAnalysisTestConfig.create_test_image(
+            width=180, height=180, color=(205, 133, 63)  # Peru color for diseased appearance
+        )
+
+        files = {
+            'file': ('test_disease_analyze.jpg', test_image, 'image/jpeg')
+        }
+        data = {
+            'analysis_type': 'disease'
+        }
+
+        response = self._make_authenticated_request(
+            'POST',
+            '/api/v1/analysis/analyze',
+            files=files,
+            data=data
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+
+        assert result['analysis_type'] == 'disease'
+        assert 'confidence_score' in result
+
+        print(f"✅ /analyze endpoint works for disease analysis: {result['id']}")
+
+    def test_analyze_endpoint_soil_analysis(self):
+        """Test the new /analyze endpoint for soil analysis."""
+
+        test_image = ImageAnalysisTestConfig.create_test_image(
+            width=160, height=160, color=(160, 82, 45)  # Saddle brown for soil
+        )
+
+        files = {
+            'file': ('test_soil_analyze.jpg', test_image, 'image/jpeg')
+        }
+        data = {
+            'analysis_type': 'soil'
+        }
+
+        response = self._make_authenticated_request(
+            'POST',
+            '/api/v1/analysis/analyze',
+            files=files,
+            data=data
+        )
+
+        assert response.status_code == 200
+        result = response.json()
+
+        assert result['analysis_type'] == 'soil'
+        assert 'confidence_score' in result
+
+        print(f"✅ /analyze endpoint works for soil analysis: {result['id']}")
     
     def test_invalid_analysis_type(self):
         """Test upload with invalid analysis type."""

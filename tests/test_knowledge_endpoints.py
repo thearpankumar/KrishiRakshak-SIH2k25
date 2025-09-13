@@ -459,7 +459,91 @@ class TestKnowledgeRepositoryEndpoints:
             assert 'count' in crop
             assert isinstance(crop['count'], int)
             assert crop['count'] > 0
-    
+
+    def test_get_popular_questions(self):
+        """Test retrieving popular questions."""
+
+        response = self._make_authenticated_request(
+            'GET',
+            '/api/v1/knowledge/popular?limit=10'
+        )
+
+        assert response.status_code == 200
+        popular_questions = response.json()
+
+        assert isinstance(popular_questions, list)
+
+        # Should have popular questions (our test entries with votes)
+        if popular_questions:
+            for question in popular_questions:
+                assert 'id' in question
+                assert 'question' in question
+                assert 'answer' in question
+                assert 'upvotes' in question
+                assert 'downvotes' in question
+                assert 'created_at' in question
+
+            # Should be ordered by popularity (upvotes - downvotes)
+            if len(popular_questions) > 1:
+                first_score = popular_questions[0]['upvotes'] - popular_questions[0]['downvotes']
+                second_score = popular_questions[1]['upvotes'] - popular_questions[1]['downvotes']
+                assert first_score >= second_score
+
+        print(f"✅ Popular questions endpoint returned {len(popular_questions)} questions")
+
+    def test_get_popular_questions_with_filters(self):
+        """Test retrieving popular questions with filters."""
+
+        # Test with crop type filter
+        response = self._make_authenticated_request(
+            'GET',
+            '/api/v1/knowledge/popular?crop_type=rice&limit=5'
+        )
+
+        assert response.status_code == 200
+        rice_popular = response.json()
+
+        assert isinstance(rice_popular, list)
+
+        # If results exist, they should be for rice
+        for question in rice_popular:
+            if question.get('crop_type'):
+                assert question['crop_type'] == 'rice'
+
+        # Test with category filter
+        response = self._make_authenticated_request(
+            'GET',
+            '/api/v1/knowledge/popular?category=pest&limit=5'
+        )
+
+        assert response.status_code == 200
+        pest_popular = response.json()
+
+        assert isinstance(pest_popular, list)
+
+        # If results exist, they should be in pest category
+        for question in pest_popular:
+            if question.get('category'):
+                assert question['category'] == 'pest'
+
+        # Test with language filter
+        response = self._make_authenticated_request(
+            'GET',
+            '/api/v1/knowledge/popular?language=english&limit=5'
+        )
+
+        assert response.status_code == 200
+        english_popular = response.json()
+
+        assert isinstance(english_popular, list)
+
+        # If results exist, they should be in English
+        for question in english_popular:
+            if question.get('language'):
+                assert question['language'] == 'english'
+
+        print("✅ Popular questions with filters work correctly")
+
     def test_delete_qa_entry(self):
         """Test deleting a Q&A entry."""
         
@@ -543,6 +627,8 @@ def test_knowledge_repository_endpoints():
         test_class.test_ask_ai_question,
         test_class.test_get_categories_list,
         test_class.test_get_crops_list,
+        test_class.test_get_popular_questions,
+        test_class.test_get_popular_questions_with_filters,
         test_class.test_delete_qa_entry,
         test_class.test_search_with_short_query,
         test_class.test_unauthorized_knowledge_access

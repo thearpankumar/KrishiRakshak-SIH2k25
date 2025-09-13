@@ -219,6 +219,37 @@ async def get_qa_entries(
     
     return qa_entries
 
+@router.get("/popular", response_model=List[QARepositorySchema])
+async def get_popular_questions(
+    limit: int = Query(20, ge=1, le=100),
+    crop_type: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
+    language: Optional[str] = Query(None),
+    session: AsyncSession = Depends(get_session)
+):
+    """Get popular Q&A entries sorted by upvotes."""
+
+    query = select(QARepository)
+
+    # Apply filters
+    if crop_type:
+        query = query.where(QARepository.crop_type == crop_type)
+    if category:
+        query = query.where(QARepository.category == category)
+    if language:
+        query = query.where(QARepository.language == language)
+
+    # Order by popularity (upvotes first, then by creation date)
+    query = query.order_by(
+        desc(QARepository.upvotes),
+        desc(QARepository.created_at)
+    ).limit(limit)
+
+    result = await session.execute(query)
+    popular_entries = result.scalars().all()
+
+    return popular_entries
+
 @router.get("/{qa_id}", response_model=QARepositorySchema)
 async def get_qa_entry(
     qa_id: str,

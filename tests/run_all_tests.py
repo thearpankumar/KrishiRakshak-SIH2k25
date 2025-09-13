@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 # Import all test modules
 from test_container_endpoints import DigitalKrishiTester
+from test_upload_endpoints import TestUploadEndpoints
 from test_analysis_endpoints import test_image_analysis_endpoints
 from test_knowledge_endpoints import test_knowledge_repository_endpoints
 from test_community_endpoints import test_community_endpoints
@@ -44,36 +45,42 @@ class ComprehensiveTestRunner:
         print("-" * 60)
         core_success = self._run_core_tests()
         
-        # Test Suite 2: Image Analysis
-        print("\n" + "📸 TEST SUITE 2: IMAGE ANALYSIS")
+        # Test Suite 2: Upload Functionality
+        print("\n" + "⬆️  TEST SUITE 2: UPLOAD FUNCTIONALITY")
+        print("-" * 60)
+        upload_success = self._run_upload_tests()
+
+        # Test Suite 3: Image Analysis
+        print("\n" + "📸 TEST SUITE 3: IMAGE ANALYSIS")
         print("-" * 60)
         analysis_success = self._run_analysis_tests()
         
-        # Test Suite 3: Knowledge Repository  
-        print("\n" + "🧠 TEST SUITE 3: KNOWLEDGE REPOSITORY")
+        # Test Suite 4: Knowledge Repository
+        print("\n" + "🧠 TEST SUITE 4: KNOWLEDGE REPOSITORY")
         print("-" * 60)
         knowledge_success = self._run_knowledge_tests()
-        
-        # Test Suite 4: Community Features
-        print("\n" + "👥 TEST SUITE 4: COMMUNITY FEATURES")
+
+        # Test Suite 5: Community Features
+        print("\n" + "👥 TEST SUITE 5: COMMUNITY FEATURES")
         print("-" * 60)
         community_success = self._run_community_tests()
-        
-        # Test Suite 5: Location Services
-        print("\n" + "📍 TEST SUITE 5: LOCATION SERVICES")
+
+        # Test Suite 6: Location Services
+        print("\n" + "📍 TEST SUITE 6: LOCATION SERVICES")
         print("-" * 60)
         location_success = self._run_location_tests()
-        
+
         # Final Results
         self._print_final_results([
             ("Core Functionality", core_success),
+            ("Upload Functionality", upload_success),
             ("Image Analysis", analysis_success),
             ("Knowledge Repository", knowledge_success),
             ("Community Features", community_success),
             ("Location Services", location_success)
         ])
-        
-        return all([core_success, analysis_success, knowledge_success, 
+
+        return all([core_success, upload_success, analysis_success, knowledge_success,
                    community_success, location_success])
     
     def _run_core_tests(self):
@@ -98,7 +105,55 @@ class ComprehensiveTestRunner:
             self.failed_tests += 1
             self.total_tests += 1
             return False
-    
+
+    def _run_upload_tests(self):
+        """Run upload functionality tests."""
+        try:
+            print("Running file upload, validation, and security tests...")
+
+            # Run upload tests
+            upload_tester = TestUploadEndpoints()
+            upload_tester.setup()
+
+            # Run all test methods
+            test_methods = [
+                upload_tester.test_upload_image_success,
+                upload_tester.test_upload_different_image_formats,
+                upload_tester.test_upload_invalid_file_type,
+                upload_tester.test_upload_without_authentication,
+                upload_tester.test_upload_corrupted_image,
+                upload_tester.test_upload_large_image,
+                upload_tester.test_upload_no_file
+            ]
+
+            for test_method in test_methods:
+                test_method()
+
+            # Clean up test user
+            upload_tester.cleanup()
+
+            print("✅ Upload functionality tests: PASSED")
+            self.passed_tests += 1
+            self.total_tests += 1
+            return True
+
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"❌ Upload functionality tests: FAILED - {str(e)}")
+            print(f"📋 Full error details:\n{error_details}")
+
+            # Try to cleanup even if tests failed
+            try:
+                if 'upload_tester' in locals():
+                    upload_tester.cleanup()
+            except:
+                pass  # Ignore cleanup errors if tests already failed
+
+            self.failed_tests += 1
+            self.total_tests += 1
+            return False
+
     def _run_analysis_tests(self):
         """Run image analysis tests."""
         try:

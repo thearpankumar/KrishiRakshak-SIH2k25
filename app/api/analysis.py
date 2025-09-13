@@ -22,15 +22,24 @@ from ..services.image_service import image_service
 
 router = APIRouter()
 
-@router.post("/upload-image", response_model=ImageAnalysisSchema)
-async def upload_and_analyze_image(
+@router.post("/analyze", response_model=ImageAnalysisSchema)
+async def analyze_image(
     analysis_type: str = Form(...),  # 'crop', 'pest', 'disease', 'soil'
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_session)
 ):
     """Upload and analyze an image for crop, pest, disease, or soil analysis."""
-    
+    return await upload_and_analyze_image_impl(analysis_type, file, current_user, session)
+
+async def upload_and_analyze_image_impl(
+    analysis_type: str,
+    file: UploadFile,
+    current_user: User,
+    session: AsyncSession
+) -> ImageAnalysis:
+    """Shared implementation for image upload and analysis."""
+
     # Validate analysis type
     valid_types = ['crop', 'pest', 'disease', 'soil']
     if analysis_type not in valid_types:
@@ -38,14 +47,14 @@ async def upload_and_analyze_image(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid analysis type. Must be one of: {', '.join(valid_types)}"
         )
-    
+
     # Validate file type
     if not file.content_type or not file.content_type.startswith('image/'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File must be an image"
         )
-    
+
     # Check file size
     contents = await file.read()
     if len(contents) > settings.max_file_size:
@@ -53,33 +62,33 @@ async def upload_and_analyze_image(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"File size exceeds maximum of {settings.max_file_size} bytes"
         )
-    
+
     try:
         # Validate image can be opened
         image = Image.open(io.BytesIO(contents))
         image.verify()
-        
+
         # Reset file pointer and reopen for processing
         image = Image.open(io.BytesIO(contents))
-        
+
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid image file"
         )
-    
+
     # Generate unique filename
     file_extension = os.path.splitext(file.filename)[1].lower()
     if not file_extension:
         file_extension = '.jpg'
-    
+
     unique_filename = f"{uuid.uuid4()}{file_extension}"
     file_path = os.path.join(settings.upload_dir, unique_filename)
-    
+
     # Save file
     async with aiofiles.open(file_path, 'wb') as f:
         await f.write(contents)
-    
+
     try:
         # Process image with AI service
         analysis_result = await image_service.analyze_image(
@@ -87,7 +96,7 @@ async def upload_and_analyze_image(
             analysis_type=analysis_type,
             user=current_user
         )
-        
+
         # Save analysis to database
         db_analysis = ImageAnalysis(
             user_id=current_user.id,
@@ -97,24 +106,34 @@ async def upload_and_analyze_image(
             confidence_score=analysis_result["confidence_score"],
             recommendations=analysis_result["recommendations"]
         )
-        
+
         session.add(db_analysis)
         await session.commit()
         await session.refresh(db_analysis)
-        
+
         return db_analysis
-        
+
     except Exception as e:
         # Clean up uploaded file if processing fails
         try:
             os.remove(file_path)
         except:
             pass
-        
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Image analysis failed: {str(e)}"
         )
+
+@router.post("/upload-image", response_model=ImageAnalysisSchema)
+async def upload_and_analyze_image(
+    analysis_type: str = Form(...),  # 'crop', 'pest', 'disease', 'soil'
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_active_user),
+    session: AsyncSession = Depends(get_session)
+):
+    """Upload and analyze an image for crop, pest, disease, or soil analysis."""
+    return await upload_and_analyze_image_impl(analysis_type, file, current_user, session)
 
 @router.get("/history", response_model=List[ImageAnalysisSchema])
 async def get_analysis_history(
