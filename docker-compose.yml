@@ -1,33 +1,90 @@
 services:
+  # Traefik Reverse Proxy & SSL Management
+  traefik:
+    image: traefik:v3.0
+    container_name: krishi-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Traefik dashboard
+    environment:
+      - ACME_EMAIL=${ACME_EMAIL}
+    volumes:
+      - ./configs/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./configs/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./acme.json:/etc/traefik/acme.json:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./logs:/var/log/traefik
+    labels:
+      - "traefik.enable=true"
+      # Dashboard (local only, no SSL)
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.dashboard.entrypoints=web"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      # Middleware for dashboard auth (optional)
+      # - "traefik.http.middlewares.auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH}"
+      # - "traefik.http.routers.dashboard.middlewares=auth"
+    networks:
+      - proxy-network
+      - n8n-network
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Single ngrok Tunnel for all services
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: krishi-ngrok
+    restart: unless-stopped
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTH_TOKEN}
+    volumes:
+      - ./configs/ngrok.yml:/etc/ngrok.yml
+    ports:
+      - "4040:4040"  # ngrok web interface
+    networks:
+      - proxy-network
+    depends_on:
+      - traefik
+    command:
+      - "start"
+      - "--all"
+      - "--config"
+      - "/etc/ngrok.yml"
+
   n8n:
     image: n8nio/n8n:latest
     container_name: n8n
     restart: unless-stopped
-    ports:
-      # Expose n8n on all network interfaces for local network access
-      - "5678:5678"
+    # Ports removed - access through Traefik only
+    expose:
+      - "5678"
     environment:
       # Basic Authentication (change these credentials!)
       - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=changeme123
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
       
       # Database configuration (using PostgreSQL for better performance)
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
       - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=n8n
-      - DB_POSTGRESDB_USER=n8n
-      - DB_POSTGRESDB_PASSWORD=n8npassword
+      - DB_POSTGRESDB_DATABASE=${DB_POSTGRES_DB}
+      - DB_POSTGRESDB_USER=${DB_POSTGRES_USER}
+      - DB_POSTGRESDB_PASSWORD=${DB_POSTGRES_PASSWORD}
       
-      # Network configuration
+      # Network configuration for Traefik reverse proxy with subdirectory
       - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      
-      # Webhook configuration for local network access
-      # Replace with your actual server IP for network access
-      - WEBHOOK_URL=http://localhost:5678/
+      - N8N_PROTOCOL=https
+      - N8N_PATH=/n8n
+      - NODE_ENV=production
+
+      # Webhook configuration for external ngrok access
+      - WEBHOOK_URL=${WEBHOOK_URL}
       
       # Allow external libraries (useful for custom functions)
       - NODE_FUNCTION_ALLOW_EXTERNAL=axios,lodash,moment
@@ -36,12 +93,11 @@ services:
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=false
       
       # Timezone (adjust as needed)
-      - GENERIC_TIMEZONE=America/New_York
-      - TZ=America/New_York
+      - GENERIC_TIMEZONE=Asia/Kolkata
+      - TZ=Asia/Kolkata
       
       # Performance settings
       - N8N_RUNNERS_ENABLED=true
-      - NODE_ENV=production
       
     volumes:
       # Persistent data storage
@@ -50,7 +106,26 @@ services:
       - ./local-files:/files
     depends_on:
       - postgres
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy-network"
+      # Local development route
+      - "traefik.http.routers.n8n-local.rule=Host(`n8n.localhost`)"
+      - "traefik.http.routers.n8n-local.entrypoints=web"
+      - "traefik.http.routers.n8n-local.service=n8n-service"
+      # n8n route with /n8n path (highest priority due to most specific rule)
+      - "traefik.http.routers.n8n-prefixed.rule=Host(`overbright-soledad-dhooly.ngrok-free.app`) && PathPrefix(`/n8n`)"
+      - "traefik.http.routers.n8n-prefixed.entrypoints=web"
+      - "traefik.http.routers.n8n-prefixed.service=n8n-service"
+      - "traefik.http.routers.n8n-prefixed.middlewares=n8n-strip"
+      - "traefik.http.routers.n8n-prefixed.priority=100"
+      # Service configuration
+      - "traefik.http.services.n8n-service.loadbalancer.server.port=5678"
+      # n8n middleware configuration
+      - "traefik.http.middlewares.n8n-strip.stripprefix.prefixes=/n8n"
     networks:
+      - proxy-network
       - n8n-network
 
   postgres:
@@ -58,9 +133,9 @@ services:
     container_name: n8n-postgres
     restart: unless-stopped
     environment:
-      - POSTGRES_DB=n8n
-      - POSTGRES_USER=n8n
-      - POSTGRES_PASSWORD=n8npassword
+      - POSTGRES_DB=${DB_POSTGRES_DB}
+      - POSTGRES_USER=${DB_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${DB_POSTGRES_PASSWORD}
       # Additional database for FastAPI
       - POSTGRES_MULTIPLE_DATABASES=krishi_officer
     volumes:
@@ -72,7 +147,7 @@ services:
       # Optional: expose PostgreSQL port for direct database access
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U n8n -d n8n"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_POSTGRES_USER} -d ${DB_POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -84,7 +159,7 @@ services:
     image: redis:7-alpine
     container_name: n8n-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --requirepass redispassword
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     ports:
@@ -110,23 +185,54 @@ services:
     build: .
     container_name: krishi-fastapi
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    # Ports removed - access through Traefik only
+    expose:
+      - "8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://n8n:n8npassword@postgres:5432/krishi_officer
-      - REDIS_URL=redis://:redispassword@redis:6379/1
-      - QDRANT_URL=http://qdrant:6333
-      - SECRET_KEY=your-secret-key-change-in-production
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - QDRANT_URL=${QDRANT_URL}
+      - SECRET_KEY=${SECRET_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
+      traefik:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy-network"
+      # Local development route
+      - "traefik.http.routers.fastapi-local.rule=Host(`api.localhost`)"
+      - "traefik.http.routers.fastapi-local.entrypoints=web"
+      - "traefik.http.routers.fastapi-local.service=fastapi-service"
+      # FastAPI with /fastapi prefix route (higher priority due to specificity)
+      - "traefik.http.routers.fastapi-prefixed.rule=Host(`overbright-soledad-dhooly.ngrok-free.app`) && PathPrefix(`/fastapi`)"
+      - "traefik.http.routers.fastapi-prefixed.entrypoints=web"
+      - "traefik.http.routers.fastapi-prefixed.service=fastapi-service"
+      - "traefik.http.routers.fastapi-prefixed.middlewares=fastapi-strip,fastapi-cors"
+      - "traefik.http.routers.fastapi-prefixed.priority=90"
+      # FastAPI root route (lower priority, catches everything else)
+      - "traefik.http.routers.z-fastapi-root.rule=Host(`overbright-soledad-dhooly.ngrok-free.app`)"
+      - "traefik.http.routers.z-fastapi-root.entrypoints=web"
+      - "traefik.http.routers.z-fastapi-root.service=fastapi-service"
+      - "traefik.http.routers.z-fastapi-root.middlewares=fastapi-cors"
+      - "traefik.http.routers.z-fastapi-root.priority=1"
+      # Service configuration
+      - "traefik.http.services.fastapi-service.loadbalancer.server.port=8000"
+      # Middleware configuration
+      - "traefik.http.middlewares.fastapi-strip.stripprefix.prefixes=/fastapi"
+      - "traefik.http.middlewares.fastapi-cors.headers.accesscontrolalloworiginlist=*"
+      - "traefik.http.middlewares.fastapi-cors.headers.accesscontrolallowmethods=GET,POST,PUT,DELETE,OPTIONS"
+      - "traefik.http.middlewares.fastapi-cors.headers.accesscontrolallowheaders=*"
+      - "traefik.http.routers.fastapi-local.middlewares=fastapi-cors"
     volumes:
       - ./app:/app/app
       - ./uploads:/app/uploads
     networks:
+      - proxy-network
       - n8n-network
     command: ["uv", "run", "python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
@@ -141,8 +247,16 @@ volumes:
     driver: local
 
 networks:
+  # Internal network for services
   n8n-network:
     driver: bridge
     ipam:
       config:
         - subnet: 172.20.0.0/16
+
+  # External-facing network for Traefik and ngrok
+  proxy-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

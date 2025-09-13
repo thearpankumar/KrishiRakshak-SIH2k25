@@ -1,0 +1,8 @@
+version: 2
+log: stdout
+
+tunnels:
+  main:
+    addr: "traefik:80"
+    proto: http
+    hostname: "overbright-soledad-dhooly.ngrok-free.app"

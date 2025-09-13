@@ -1,0 +1,30 @@
+# Traefik Dynamic Configuration
+# This file defines middlewares and other dynamic configuration
+
+http:
+  middlewares:
+    # Security headers middleware
+    security-headers:
+      headers:
+        customResponseHeaders:
+          X-Frame-Options: "DENY"
+          X-Content-Type-Options: "nosniff"
+          X-XSS-Protection: "1; mode=block"
+          Referrer-Policy: "strict-origin-when-cross-origin"
+          Content-Security-Policy: "default-src 'self'"
+        sslRedirect: true
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+
+    # Rate limiting middleware
+    rate-limit:
+      rateLimit:
+        burst: 50
+        average: 10
+
+    # Basic auth for services (if needed)
+    basic-auth:
+      basicAuth:
+        users:
+          - "admin:$2y$10$3ByTN8O1kD3XDfuW3z4HYu"  # admin:password

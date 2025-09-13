@@ -84,11 +84,17 @@ qdrant_data/
 temp/
 tmp/
 
-# SSL certificates
+# SSL certificates and Traefik files
 *.pem
 *.key
 *.crt
 *.csr
+acme.json
+traefik.log
+
+# Docker volumes and logs
+logs/
+data/
 
 # Backup files
 *.bak
