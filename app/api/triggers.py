@@ -18,17 +18,38 @@ async def call_n8n_webhook(webhook_path: str, data: Dict[Any, Any], timeout: flo
     """Helper function to call N8N webhooks"""
     webhook_url = f"{settings.n8n_webhook_base_url}/{webhook_path}"
 
+    print(f"🔗 N8N Webhook URL: {webhook_url}")
+    print(f"📤 Data being sent to N8N: {data}")
+
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(webhook_url, json=data, timeout=timeout)
+            print(f"📡 N8N Response Status: {response.status_code}")
+            print(f"📡 N8N Response Headers: {response.headers}")
+
+            response_text = response.text
+            print(f"📡 N8N Raw Response: {response_text}")
+
             response.raise_for_status()
+
+            if not response_text.strip():
+                print("⚠️ N8N returned empty response")
+                return {"status": "success", "message": "N8N webhook called but returned empty response"}
+
             return response.json()
         except httpx.TimeoutException:
+            print("⏰ N8N Webhook timeout")
             raise HTTPException(status_code=408, detail="N8N workflow timeout")
         except httpx.RequestError as e:
+            print(f"🚫 N8N Request Error: {str(e)}")
             raise HTTPException(status_code=503, detail=f"Failed to call N8N: {str(e)}")
         except httpx.HTTPStatusError as e:
+            print(f"❌ N8N HTTP Status Error: {e.response.status_code} - {e.response.text}")
             raise HTTPException(status_code=e.response.status_code, detail=f"N8N workflow error: {e.response.text}")
+        except ValueError as e:
+            print(f"🔍 N8N JSON Parse Error: {str(e)}")
+            print(f"🔍 Response was: {response_text}")
+            raise HTTPException(status_code=503, detail=f"Failed to parse N8N response: {str(e)}")
 
 @router.post("/analyze-image")
 async def trigger_image_analysis(

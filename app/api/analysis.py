@@ -96,6 +96,10 @@ async def upload_and_trigger_analysis(
             "timestamp": datetime.utcnow().isoformat()
         }
 
+        print(f"🔍 Enhanced data for N8N: {enhanced_data}")
+        print(f"👤 Current user: ID={current_user.id}, Location={current_user.location}")
+        print(f"📁 File path: {file_path}")
+
         trigger_result = await call_n8n_webhook("image-analysis", enhanced_data, timeout=60.0)
 
         # Return immediate response - actual results will come via webhook
