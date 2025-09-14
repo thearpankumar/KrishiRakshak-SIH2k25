@@ -35,6 +35,13 @@ async def receive_image_analysis_result(
                 raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
 
         # Save enhanced analysis result to database
+        recommendations = data.get("recommendations", [])
+        # Convert recommendations list to string if needed
+        if isinstance(recommendations, list):
+            recommendations_str = "; ".join(recommendations) if recommendations else ""
+        else:
+            recommendations_str = str(recommendations)
+
         analysis = ImageAnalysis(
             id=str(uuid.uuid4()),
             user_id=data["user_id"],
@@ -42,7 +49,7 @@ async def receive_image_analysis_result(
             analysis_type=data["analysis_type"],
             results=data["results"],
             confidence_score=float(data["confidence_score"]),
-            recommendations=data.get("recommendations", []),
+            recommendations=recommendations_str,
         )
 
         # Add enhanced metadata from N8N processing
