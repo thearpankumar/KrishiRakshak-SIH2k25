@@ -1,11 +1,12 @@
 """
-Tests for Community Features API endpoints.
+Tests for Community Features API endpoints with N8N content moderation.
 """
 
 import pytest
 import requests
 import json
 from typing import Dict, Any, Optional, List
+from unittest.mock import patch, AsyncMock
 from test_container_endpoints import TestConfig
 
 
@@ -289,41 +290,59 @@ class TestCommunityEndpoints:
         assert result['location'] == updated_data['location']
     
     def test_send_group_message(self):
-        """Test sending a message to a group chat."""
-        
-        message_data = {
-            "message": "Hello everyone! What's the best time to plant rice this season?",
-            "message_type": "text"
-        }
-        
-        # Convert message_data to include group_id as required by schema
-        message_with_group = {
-            "group_id": self.rice_group_id,
-            **message_data
-        }
-        
-        response = self._make_authenticated_request(
-            'POST',
-            f'/api/v1/community/groups/{self.rice_group_id}/messages',
-            json=message_with_group  # API expects message with group_id in body
-        )
-        
-        assert response.status_code == 200
-        result = response.json()
-        
-        # Verify response structure
-        assert 'id' in result
-        assert result['message'] == message_data['message']
-        assert result['message_type'] == message_data['message_type']
-        assert result['group_id'] == self.rice_group_id
-        assert result['user_id'] == self.user_id
-        assert 'created_at' in result
-        assert 'user' in result
-        assert result['user']['id'] == self.user_id
-        
-        # Store for later tests
-        self.first_message_id = result['id']
-        self.message_ids.append(result['id'])
+        """Test sending a message to a group chat with N8N content moderation."""
+
+        with patch('httpx.AsyncClient') as mock_client:
+            # Setup mock N8N moderation response (approved)
+            mock_instance = AsyncMock()
+            mock_client.return_value.__aenter__.return_value = mock_instance
+            mock_client.return_value.__aexit__ = AsyncMock()
+
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "action": "approve",
+                "moderation_id": "test-mod-123",
+                "confidence_score": 0.95
+            }
+            mock_instance.post.return_value = mock_response
+
+            message_data = {
+                "message": "Hello everyone! What's the best time to plant rice this season?",
+                "message_type": "text"
+            }
+
+            # Convert message_data to include group_id as required by schema
+            message_with_group = {
+                "group_id": self.rice_group_id,
+                **message_data
+            }
+
+            response = self._make_authenticated_request(
+                'POST',
+                f'/api/v1/community/groups/{self.rice_group_id}/messages',
+                json=message_with_group  # API expects message with group_id in body
+            )
+
+            assert response.status_code == 200
+            result = response.json()
+
+            # Verify response structure with moderation
+            assert 'id' in result
+            assert result['message'] == message_data['message']
+            assert result['message_type'] == message_data['message_type']
+            assert result['group_id'] == self.rice_group_id
+            assert result['user_id'] == self.user_id
+            assert result['moderated'] == True
+            assert result['status'] == 'approved'
+            assert 'created_at' in result
+
+            # Verify moderation was called
+            mock_instance.post.assert_called_once()
+
+            # Store for later tests
+            self.first_message_id = result['id']
+            self.message_ids.append(result['id'])
     
     def test_send_multiple_group_messages(self):
         """Test sending multiple messages from different users."""
@@ -664,6 +683,123 @@ class TestCommunityEndpoints:
         
         # This might be accessible without auth, but posting shouldn't be
         assert response.status_code in [200, 401, 403]
+
+    def test_content_moderation_approved(self):
+        """Test message that gets approved by content moderation."""
+
+        with patch('httpx.AsyncClient') as mock_client:
+            # Setup mock N8N moderation response (approved)
+            mock_instance = AsyncMock()
+            mock_client.return_value.__aenter__.return_value = mock_instance
+            mock_client.return_value.__aexit__ = AsyncMock()
+
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "action": "approve",
+                "moderation_id": "test-mod-approved",
+                "confidence_score": 0.9
+            }
+            mock_instance.post.return_value = mock_response
+
+            message_data = {
+                "group_id": self.rice_group_id,
+                "message": "Great question! I recommend planting rice after the first monsoon rains.",
+                "message_type": "text"
+            }
+
+            response = self._make_authenticated_request(
+                'POST',
+                f'/api/v1/community/groups/{self.rice_group_id}/messages',
+                json=message_data
+            )
+
+            assert response.status_code == 200
+            result = response.json()
+
+            assert result['status'] == 'approved'
+            assert result['moderated'] == True
+
+            # Verify moderation was called
+            mock_instance.post.assert_called_once()
+
+    def test_content_moderation_rejected(self):
+        """Test message that gets rejected by content moderation."""
+
+        with patch('httpx.AsyncClient') as mock_client:
+            # Setup mock N8N moderation response (rejected)
+            mock_instance = AsyncMock()
+            mock_client.return_value.__aenter__.return_value = mock_instance
+            mock_client.return_value.__aexit__ = AsyncMock()
+
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "action": "reject",
+                "moderation_id": "test-mod-rejected",
+                "confidence_score": 0.95,
+                "reasons": ["Inappropriate content detected"]
+            }
+            mock_instance.post.return_value = mock_response
+
+            message_data = {
+                "group_id": self.rice_group_id,
+                "message": "This is inappropriate content that should be rejected.",
+                "message_type": "text"
+            }
+
+            response = self._make_authenticated_request(
+                'POST',
+                f'/api/v1/community/groups/{self.rice_group_id}/messages',
+                json=message_data
+            )
+
+            assert response.status_code == 400
+            error_data = response.json()
+            assert 'violates community guidelines' in error_data['detail']
+
+            # Verify moderation was called
+            mock_instance.post.assert_called_once()
+
+    def test_content_moderation_review_required(self):
+        """Test message that requires human review."""
+
+        with patch('httpx.AsyncClient') as mock_client:
+            # Setup mock N8N moderation response (needs review)
+            mock_instance = AsyncMock()
+            mock_client.return_value.__aenter__.return_value = mock_instance
+            mock_client.return_value.__aexit__ = AsyncMock()
+
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "action": "review",
+                "moderation_id": "test-mod-review",
+                "confidence_score": 0.6
+            }
+            mock_instance.post.return_value = mock_response
+
+            message_data = {
+                "group_id": self.rice_group_id,
+                "message": "This message has ambiguous content that needs human review.",
+                "message_type": "text"
+            }
+
+            response = self._make_authenticated_request(
+                'POST',
+                f'/api/v1/community/groups/{self.rice_group_id}/messages',
+                json=message_data
+            )
+
+            assert response.status_code == 200
+            result = response.json()
+
+            assert result['status'] == 'pending_review'
+            assert 'review_id' in result
+            assert 'estimated_review_time' in result
+
+            # Verify moderation was called
+            mock_instance.post.assert_called_once()
 
 
 def test_community_endpoints():

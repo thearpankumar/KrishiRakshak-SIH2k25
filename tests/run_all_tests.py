@@ -16,6 +16,8 @@ from test_analysis_endpoints import test_image_analysis_endpoints
 from test_knowledge_endpoints import test_knowledge_repository_endpoints
 from test_community_endpoints import test_community_endpoints
 from test_location_endpoints import test_location_services_endpoints
+from test_triggers import test_n8n_trigger_endpoints
+from test_webhooks import test_n8n_webhook_endpoints
 
 
 class ComprehensiveTestRunner:
@@ -70,6 +72,16 @@ class ComprehensiveTestRunner:
         print("-" * 60)
         location_success = self._run_location_tests()
 
+        # Test Suite 7: N8N Trigger Endpoints
+        print("\n" + "🔗 TEST SUITE 7: N8N TRIGGER ENDPOINTS")
+        print("-" * 60)
+        trigger_success = self._run_trigger_tests()
+
+        # Test Suite 8: N8N Webhook Endpoints
+        print("\n" + "🔄 TEST SUITE 8: N8N WEBHOOK ENDPOINTS")
+        print("-" * 60)
+        webhook_success = self._run_webhook_tests()
+
         # Final Results
         self._print_final_results([
             ("Core Functionality", core_success),
@@ -77,11 +89,13 @@ class ComprehensiveTestRunner:
             ("Image Analysis", analysis_success),
             ("Knowledge Repository", knowledge_success),
             ("Community Features", community_success),
-            ("Location Services", location_success)
+            ("Location Services", location_success),
+            ("N8N Trigger Endpoints", trigger_success),
+            ("N8N Webhook Endpoints", webhook_success)
         ])
 
         return all([core_success, upload_success, analysis_success, knowledge_success,
-                   community_success, location_success])
+                   community_success, location_success, trigger_success, webhook_success])
     
     def _run_core_tests(self):
         """Run core functionality tests."""
@@ -211,9 +225,41 @@ class ComprehensiveTestRunner:
             self.passed_tests += 1
             self.total_tests += 1
             return True
-            
+
         except Exception as e:
             print(f"❌ Location services tests: FAILED - {str(e)}")
+            self.failed_tests += 1
+            self.total_tests += 1
+            return False
+
+    def _run_trigger_tests(self):
+        """Run N8N trigger endpoint tests."""
+        try:
+            print("Running N8N workflow trigger, authentication, and integration tests...")
+            test_n8n_trigger_endpoints()
+            print("✅ N8N trigger endpoint tests: PASSED")
+            self.passed_tests += 1
+            self.total_tests += 1
+            return True
+
+        except Exception as e:
+            print(f"❌ N8N trigger endpoint tests: FAILED - {str(e)}")
+            self.failed_tests += 1
+            self.total_tests += 1
+            return False
+
+    def _run_webhook_tests(self):
+        """Run N8N webhook endpoint tests."""
+        try:
+            print("Running N8N webhook receivers, callback processing, and validation tests...")
+            test_n8n_webhook_endpoints()
+            print("✅ N8N webhook endpoint tests: PASSED")
+            self.passed_tests += 1
+            self.total_tests += 1
+            return True
+
+        except Exception as e:
+            print(f"❌ N8N webhook endpoint tests: FAILED - {str(e)}")
             self.failed_tests += 1
             self.total_tests += 1
             return False
@@ -246,13 +292,15 @@ class ComprehensiveTestRunner:
         print(f"\n🎯 Feature Coverage Summary:")
         features_tested = [
             "✅ User Authentication & Authorization",
-            "✅ Farming Profile Management", 
+            "✅ Farming Profile Management",
             "✅ AI-Powered Chat System",
             "✅ Image Analysis & Vision AI",
             "✅ Knowledge Repository with Vector Search",
             "✅ Community Group Chats & Messaging",
             "✅ Location-Based Retailer Services",
             "✅ Geospatial Distance Calculations",
+            "✅ N8N Workflow Integration & Triggers",
+            "✅ N8N Webhook Processing & Callbacks",
             "✅ Multi-language Support",
             "✅ Rate Limiting & Security"
         ]
@@ -264,11 +312,13 @@ class ComprehensiveTestRunner:
         print(f"\n🔗 API Endpoints Tested:")
         endpoints_tested = [
             "/api/v1/auth/* (Registration, Login, Profiles)",
-            "/api/v1/chat/* (AI Chat, History, Management)", 
+            "/api/v1/chat/* (AI Chat, History, Management)",
             "/api/v1/analysis/* (Image Upload, Analysis, Stats)",
             "/api/v1/knowledge/* (Q&A, Search, AI Integration)",
             "/api/v1/community/* (Groups, Messages, Discovery)",
-            "/api/v1/location/* (Retailers, Nearby Search, Services)"
+            "/api/v1/location/* (Retailers, Nearby Search, Services)",
+            "/api/v1/triggers/* (N8N Workflow Triggers, Integration)",
+            "/api/v1/webhooks/* (N8N Callbacks, Result Processing)"
         ]
         
         for endpoint in endpoints_tested:

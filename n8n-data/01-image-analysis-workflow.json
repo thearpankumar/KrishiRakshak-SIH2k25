@@ -1,0 +1,200 @@
+{
+  "name": "Enhanced Image Analysis Workflow",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Image Analysis Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [200, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "image-analysis",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "http://localhost:8000"
+        }
+      },
+      "webhookId": "image-analysis-webhook"
+    },
+    {
+      "id": "2",
+      "name": "Validate Input Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Validate required input fields for image analysis\nconst input = $input.first().json;\n\n// Check required fields\nif (!input.image_path || !input.analysis_type || !input.user_id) {\n  throw new Error('Missing required fields: image_path, analysis_type, user_id');\n}\n\n// Validate analysis type\nconst validTypes = ['crop', 'pest', 'disease', 'soil'];\nif (!validTypes.includes(input.analysis_type)) {\n  throw new Error(`Invalid analysis_type. Must be one of: ${validTypes.join(', ')}`);\n}\n\n// Validate image path exists\nif (typeof input.image_path !== 'string' || input.image_path.length < 5) {\n  throw new Error('Invalid image_path provided');\n}\n\nreturn {\n  json: {\n    ...input,\n    validated: true,\n    timestamp: new Date().toISOString(),\n    workflow_version: '1.0'\n  }\n};"
+      }
+    },
+    {
+      "id": "3",
+      "name": "Enhanced AI Analysis",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [600, 300],
+      "parameters": {
+        "resource": "assistant",
+        "operation": "message",
+        "assistantId": "agri-expert-assistant",
+        "message": "=Analyze this {{ $json.analysis_type }} image: {{ $json.image_path }}. Provide detailed agricultural analysis for Kerala farming conditions including:\n\n1. Primary Analysis: Detailed identification and assessment\n2. Confidence Score: Rate your confidence (0-1)\n3. Severity Level: low/medium/high/critical\n4. Recommendations: Specific actionable steps\n5. Treatment: Detailed treatment plan\n6. Prevention: Future prevention measures\n7. Local Context: Kerala-specific considerations\n8. Seasonal Factors: Current season impact\n\nFormat response as JSON with all above fields.",
+        "options": {
+          "model": "gpt-4o-mini",
+          "maxTokens": 1000,
+          "temperature": 0.2
+        }
+      },
+      "credentials": {
+        "openAiApi": "openai-credentials"
+      }
+    },
+    {
+      "id": "4",
+      "name": "Process AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Process and structure OpenAI response\nconst input = $('Validate Input Data').first().json;\nconst aiResponse = $input.first().json;\n\nlet analysisResult;\ntry {\n  // Try to parse AI response as JSON\n  const content = aiResponse.choices?.[0]?.message?.content || aiResponse.content || aiResponse.text;\n  analysisResult = JSON.parse(content);\n} catch (e) {\n  // Fallback: structure the raw response\n  const content = aiResponse.choices?.[0]?.message?.content || aiResponse.content || aiResponse.text || 'Analysis unavailable';\n  analysisResult = {\n    primary_analysis: content,\n    confidence_score: 0.75,\n    severity_level: 'medium',\n    recommendations: ['Consult with local agricultural expert for detailed guidance'],\n    treatment: 'Follow standard agricultural practices for this condition',\n    prevention: 'Regular monitoring and preventive measures recommended',\n    local_context: 'General Kerala agricultural practices apply',\n    seasonal_factors: 'Consider current seasonal conditions'\n  };\n}\n\n// Enhanced result with metadata\nconst enhancedResult = {\n  user_id: input.user_id,\n  image_path: input.image_path,\n  analysis_type: input.analysis_type,\n  results: {\n    primary_analysis: analysisResult.primary_analysis || analysisResult.analysis || 'Analysis completed',\n    detailed_findings: analysisResult.primary_analysis || analysisResult.analysis || 'Analysis completed',\n    confidence_score: analysisResult.confidence_score || analysisResult.confidence || 0.75,\n    severity_level: analysisResult.severity_level || analysisResult.severity || 'medium'\n  },\n  confidence_score: analysisResult.confidence_score || analysisResult.confidence || 0.75,\n  recommendations: Array.isArray(analysisResult.recommendations) ? analysisResult.recommendations : [analysisResult.recommendations || 'Follow agricultural best practices'],\n  treatment_plan: analysisResult.treatment || 'Standard treatment recommended',\n  prevention_measures: analysisResult.prevention || 'Regular monitoring recommended',\n  metadata: {\n    model_used: 'gpt-4o-mini',\n    processing_time: new Date().toISOString(),\n    enhanced_by_n8n: true,\n    workflow_version: '1.0',\n    local_context: analysisResult.local_context || 'Kerala agricultural context',\n    seasonal_factors: analysisResult.seasonal_factors || 'Seasonal considerations applied'\n  },\n  status: 'completed'\n};\n\nreturn { json: enhancedResult };"
+      }
+    },
+    {
+      "id": "5",
+      "name": "Send to Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/v1/webhooks/image-analysis",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Workflow-Source",
+              "value": "n8n-image-analysis"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonParameters": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "retry": {
+            "enabled": true,
+            "maxRetries": 3,
+            "waitBetweenRetries": 1000
+          }
+        }
+      }
+    },
+    {
+      "id": "6",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1200, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: 'success',\n  message: 'Image analysis completed successfully',\n  analysis_id: $json.analysis_id || 'pending',\n  confidence_score: $json.confidence_score,\n  processing_time: $json.metadata.processing_time,\n  enhanced: true\n}) }}"
+      }
+    },
+    {
+      "id": "7",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [600, 500],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: 'error',\n  message: 'Image analysis failed',\n  error: $json.error?.message || $json.message || 'Unknown error occurred',\n  timestamp: new Date().toISOString()\n}) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Image Analysis Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input Data": {
+      "main": [
+        [
+          {
+            "node": "Enhanced AI Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enhanced AI Analysis": {
+      "main": [
+        [
+          {
+            "node": "Process AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process AI Response": {
+      "main": [
+        [
+          {
+            "node": "Send to Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Backend": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "global-error-handler"
+  },
+  "staticData": {},
+  "tags": [
+    {
+      "createdAt": "2025-01-15T00:00:00.000Z",
+      "updatedAt": "2025-01-15T00:00:00.000Z",
+      "id": "agriculture-ai",
+      "name": "agriculture-ai"
+    }
+  ],
+  "triggerCount": 1,
+  "active": false,
+  "id": "1"
+}

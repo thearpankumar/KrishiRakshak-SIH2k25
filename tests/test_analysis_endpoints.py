@@ -1,5 +1,5 @@
 """
-Tests for Image Analysis API endpoints.
+Tests for Image Analysis API endpoints with N8N integration.
 """
 
 import pytest
@@ -8,6 +8,7 @@ import io
 import json
 from PIL import Image
 from typing import Dict, Any, Optional
+from unittest.mock import patch, AsyncMock
 from test_container_endpoints import TestConfig
 
 
@@ -70,7 +71,7 @@ class TestImageAnalysisEndpoints:
         
         # Create farming profile for better AI context
         profile_data = {
-            "crops_grown": ["rice", "tomatoes"],
+            "crop_types": ["rice", "tomatoes"],
             "farm_size": 3.5,
             "farming_experience": 5,
             "preferred_language": "malayalam"
@@ -94,43 +95,55 @@ class TestImageAnalysisEndpoints:
         return getattr(requests, method.lower())(url, **kwargs)
     
     def test_upload_single_image_crop_analysis(self):
-        """Test uploading and analyzing a single image for crop analysis."""
-        
-        # Create a test image
-        test_image = ImageAnalysisTestConfig.create_test_image(
-            width=200, height=200, color=(34, 139, 34)  # Forest green for crop-like appearance
-        )
-        
-        # Prepare multipart form data
-        files = {
-            'file': ('test_crop.jpg', test_image, 'image/jpeg')
-        }
-        data = {
-            'analysis_type': 'crop'
-        }
-        
-        response = self._make_authenticated_request(
-            'POST',
-            '/api/v1/analysis/upload-image',
-            files=files,
-            data=data
-        )
-        
-        assert response.status_code == 200
-        result = response.json()
-        
-        # Verify response structure
-        assert 'id' in result
-        assert result['analysis_type'] == 'crop'
-        assert result['user_id'] == self.user_id
-        assert 'image_path' in result
-        assert 'results' in result
-        assert 'confidence_score' in result
-        assert 'recommendations' in result
-        assert 'created_at' in result
-        
-        # Store analysis ID for later tests
-        self.crop_analysis_id = result['id']
+        """Test uploading and analyzing a single image for crop analysis with N8N integration."""
+
+        with patch('httpx.AsyncClient') as mock_client:
+            # Setup mock N8N response
+            mock_instance = AsyncMock()
+            mock_client.return_value.__aenter__.return_value = mock_instance
+            mock_client.return_value.__aexit__ = AsyncMock()
+
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "status": "processing",
+                "workflow_triggered": True,
+                "enhanced_processing": True
+            }
+            mock_instance.post.return_value = mock_response
+
+            # Create a test image
+            test_image = ImageAnalysisTestConfig.create_test_image(
+                width=200, height=200, color=(34, 139, 34)  # Forest green for crop-like appearance
+            )
+
+            # Prepare multipart form data
+            files = {
+                'file': ('test_crop.jpg', test_image, 'image/jpeg')
+            }
+            data = {
+                'analysis_type': 'crop'
+            }
+
+            response = self._make_authenticated_request(
+                'POST',
+                '/api/v1/analysis/upload-image',
+                files=files,
+                data=data
+            )
+
+            assert response.status_code == 200
+            result = response.json()
+
+            # Verify N8N integration response structure
+            assert result['status'] == 'processing'
+            assert result['workflow_triggered'] == True
+            assert result['enhanced_processing'] == True
+            assert 'message' in result
+            assert 'estimated_time' in result
+
+            # Verify N8N workflow was called
+            mock_instance.post.assert_called_once()
     
     def test_upload_single_image_pest_analysis(self):
         """Test uploading and analyzing a single image for pest analysis."""
@@ -408,37 +421,57 @@ class TestImageAnalysisEndpoints:
         assert response.status_code in [200, 413]
     
     def test_batch_analyze_images(self):
-        """Test batch analysis of multiple images."""
-        
-        # Create multiple test images
-        images = []
-        for i in range(3):
-            color = [(255, 0, 0), (0, 255, 0), (0, 0, 255)][i]  # Red, Green, Blue
-            img = ImageAnalysisTestConfig.create_test_image(
-                width=120, height=120, color=color
+        """Test batch analysis of multiple images with N8N integration."""
+
+        with patch('httpx.AsyncClient') as mock_client:
+            # Setup mock N8N response for batch processing
+            mock_instance = AsyncMock()
+            mock_client.return_value.__aenter__.return_value = mock_instance
+            mock_client.return_value.__aexit__ = AsyncMock()
+
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "status": "processing",
+                "message": "Enhanced batch analysis started for 3 images",
+                "batch_size": 3,
+                "workflow_triggered": True,
+                "enhanced_processing": True
+            }
+            mock_instance.post.return_value = mock_response
+
+            # Create multiple test images
+            images = []
+            for i in range(3):
+                color = [(255, 0, 0), (0, 255, 0), (0, 0, 255)][i]  # Red, Green, Blue
+                img = ImageAnalysisTestConfig.create_test_image(
+                    width=120, height=120, color=color
+                )
+                images.append(('files', (f'batch_test_{i}.jpg', img, 'image/jpeg')))
+
+            data = {
+                'analysis_type': 'crop'
+            }
+
+            response = self._make_authenticated_request(
+                'POST',
+                '/api/v1/analysis/batch-analyze',
+                files=images,
+                data=data
             )
-            images.append(('files', (f'batch_test_{i}.jpg', img, 'image/jpeg')))
-        
-        data = {
-            'analysis_type': 'crop'
-        }
-        
-        response = self._make_authenticated_request(
-            'POST',
-            '/api/v1/analysis/batch-analyze',
-            files=images,
-            data=data
-        )
-        
-        assert response.status_code == 200
-        result = response.json()
-        
-        assert 'results' in result
-        assert len(result['results']) == 3
-        
-        for batch_result in result['results']:
-            assert 'filename' in batch_result
-            assert 'success' in batch_result
+
+            assert response.status_code == 200
+            result = response.json()
+
+            # Verify N8N batch processing response
+            assert result['status'] == 'processing'
+            assert result['batch_size'] == 3
+            assert result['workflow_triggered'] == True
+            assert result['enhanced_processing'] == True
+            assert 'estimated_time' in result
+
+            # Verify N8N workflow was called for batch processing
+            mock_instance.post.assert_called_once()
     
     def test_get_analysis_history(self):
         """Test retrieving analysis history."""
@@ -584,28 +617,116 @@ class TestImageAnalysisEndpoints:
         assert response.status_code in [401, 403]  # Unauthorized or Forbidden
     
     def test_batch_analyze_too_many_files(self):
-        """Test batch analysis with too many files."""
-        
-        # Create more than 10 images (the limit)
+        """Test batch analysis with too many files (N8N supports up to 20)."""
+
+        # Create more than 20 images (the new N8N limit)
         images = []
-        for i in range(12):  # Over the limit
+        for i in range(22):  # Over the limit
             img = ImageAnalysisTestConfig.create_test_image(width=50, height=50)
             images.append(('files', (f'batch_overflow_{i}.jpg', img, 'image/jpeg')))
-        
+
         data = {
             'analysis_type': 'pest'
         }
-        
+
         response = self._make_authenticated_request(
             'POST',
             '/api/v1/analysis/batch-analyze',
             files=images,
             data=data
         )
-        
+
         assert response.status_code == 400
         error_data = response.json()
-        assert 'Maximum 10 images allowed' in error_data['detail']
+        assert 'Maximum 20 images allowed' in error_data['detail']
+
+    def test_analysis_n8n_fallback_mode(self):
+        """Test analysis fallback when N8N is unavailable."""
+
+        with patch('httpx.AsyncClient') as mock_client:
+            # Setup mock to simulate N8N unavailable
+            mock_instance = AsyncMock()
+            mock_client.return_value.__aenter__.return_value = mock_instance
+            mock_client.return_value.__aexit__ = AsyncMock()
+
+            # Simulate N8N service unavailable
+            import httpx
+            mock_instance.post.side_effect = httpx.RequestError("N8N service unavailable")
+
+            test_image = ImageAnalysisTestConfig.create_test_image()
+
+            files = {
+                'file': ('test_fallback.jpg', test_image, 'image/jpeg')
+            }
+            data = {
+                'analysis_type': 'crop'
+            }
+
+            response = self._make_authenticated_request(
+                'POST',
+                '/api/v1/analysis/analyze',
+                files=files,
+                data=data
+            )
+
+            # Should return 503 when N8N is unavailable
+            assert response.status_code == 503
+            error_data = response.json()
+            assert 'Failed to start enhanced analysis' in error_data['detail']
+
+    def test_n8n_integration_success(self):
+        """Test successful N8N integration with proper workflow triggering."""
+
+        with patch('httpx.AsyncClient') as mock_client:
+            mock_instance = AsyncMock()
+            mock_client.return_value.__aenter__.return_value = mock_instance
+            mock_client.return_value.__aexit__ = AsyncMock()
+
+            # Mock successful N8N response
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "status": "success",
+                "message": "Image analysis completed successfully",
+                "analysis_id": "n8n-test-123",
+                "confidence_score": 0.89,
+                "enhanced": True
+            }
+            mock_instance.post.return_value = mock_response
+
+            test_image = ImageAnalysisTestConfig.create_test_image(
+                width=200, height=200, color=(34, 139, 34)
+            )
+
+            files = {
+                'file': ('test_n8n_success.jpg', test_image, 'image/jpeg')
+            }
+            data = {
+                'analysis_type': 'disease'
+            }
+
+            response = self._make_authenticated_request(
+                'POST',
+                '/api/v1/analysis/analyze',
+                files=files,
+                data=data
+            )
+
+            assert response.status_code == 200
+            result = response.json()
+
+            # Verify enhanced processing response
+            assert result['status'] == 'processing'
+            assert result['enhanced_processing'] == True
+            assert result['workflow_triggered'] == True
+            assert 'estimated_time' in result
+
+            # Verify N8N was called with correct parameters
+            mock_instance.post.assert_called_once()
+            call_args = mock_instance.post.call_args
+
+            # Check the URL contains the trigger endpoint
+            assert 'triggers/analyze-image' in call_args[1]['data']['image_path'] or 'analyze-image' in str(call_args)
 
 
 def test_image_analysis_endpoints():

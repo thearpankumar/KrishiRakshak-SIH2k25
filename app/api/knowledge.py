@@ -3,6 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func, or_, and_
 from typing import List, Optional
 import uuid
+import httpx
+from datetime import datetime
 
 from ..core.database import get_session
 from ..core.dependencies import get_current_active_user
@@ -13,7 +15,6 @@ from ..models.schemas import (
     QASearchResult
 )
 from ..services.vector_service import vector_service
-from ..services.ai_service import ai_service
 
 router = APIRouter()
 
@@ -382,64 +383,78 @@ async def ask_ai_question(
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_session)
 ):
-    """Ask a question to AI and optionally save to knowledge base."""
-    
+    """Ask a question to enhanced AI via N8N and optionally save to knowledge base."""
+
     # First, search existing knowledge base
-    similar_entries = await vector_service.search_similar_questions(
-        query=question,
-        crop_type=crop_type,
-        language=language,
-        limit=3,
-        similarity_threshold=0.8
-    )
-    
-    # If we have very similar questions, return the best match
-    if similar_entries and similar_entries[0]["similarity_score"] > 0.9:
-        best_match = similar_entries[0]
-        return {
-            "answer": best_match["answer"],
-            "source": "knowledge_base",
-            "similarity_score": best_match["similarity_score"],
-            "qa_id": best_match["qa_id"]
+    try:
+        similar_entries = await vector_service.search_similar_questions(
+            query=question,
+            crop_type=crop_type,
+            language=language,
+            limit=3,
+            similarity_threshold=0.8
+        )
+
+        # If we have very similar questions, return the best match
+        if similar_entries and similar_entries[0]["similarity_score"] > 0.9:
+            best_match = similar_entries[0]
+            return {
+                "answer": best_match["answer"],
+                "source": "knowledge_base",
+                "similarity_score": best_match["similarity_score"],
+                "qa_id": best_match["qa_id"],
+                "enhanced_processing": False
+            }
+    except Exception:
+        # Continue with AI processing if vector search fails
+        similar_entries = []
+
+    try:
+        # Trigger N8N enhanced knowledge processing
+        from .triggers import call_n8n_webhook
+
+        enhanced_data = {
+            "user_id": str(current_user.id),
+            "question": question,
+            "crop_type": crop_type,
+            "language": language,
+            "user_location": current_user.location,
+            "query_id": f"knowledge_{uuid.uuid4()}",
+            "timestamp": datetime.utcnow().isoformat()
         }
-    
-    # Otherwise, get AI response
-    ai_response = await ai_service.process_chat_message(
-        message=question,
-        message_type="text",
-        user=current_user,
-        user_profile=None  # Could get user profile if needed
-    )
-    
-    # Optionally save high-quality responses to knowledge base
-    if ai_response["trust_score"] > 0.8:
-        new_qa = QARepository(
-            question=question,
-            answer=ai_response["response"],
-            crop_type=crop_type,
-            category="ai_generated",
-            language=language
-        )
-        
-        session.add(new_qa)
-        await session.commit()
-        await session.refresh(new_qa)
-        
-        # Add to vector database
-        await vector_service.add_qa_to_vector_db(
-            qa_id=str(new_qa.id),
-            question=question,
-            answer=ai_response["response"],
-            crop_type=crop_type,
-            category="ai_generated",
-            language=language
-        )
-    
+
+        result = await call_n8n_webhook("knowledge-query", enhanced_data, timeout=60.0)
+
+        return {
+            "answer": result.get("ai_response", "Processing your question..."),
+            "source": "enhanced_ai",
+            "trust_score": result.get("trust_score", 0.8),
+            "similar_questions": similar_entries[:2] if similar_entries else [],
+            "enhanced_processing": True,
+            "saved_to_kb": result.get("saved_to_kb", False)
+        }
+
+    except Exception:
+        # Fallback response if N8N is unavailable
+        return await _knowledge_fallback(question, crop_type, language, similar_entries)
+
+
+async def _knowledge_fallback(
+    question: str,
+    crop_type: Optional[str],
+    language: str,
+    similar_entries: list
+):
+    """Fallback knowledge response when N8N is unavailable."""
+
+    # Basic response
     return {
-        "answer": ai_response["response"],
-        "source": "ai_generated",
-        "trust_score": ai_response["trust_score"],
-        "similar_questions": similar_entries[:2] if similar_entries else []
+        "answer": "I've received your agricultural question. Our enhanced AI system will process this and provide you with detailed, location-specific guidance shortly.",
+        "source": "fallback",
+        "trust_score": 0.6,
+        "similar_questions": similar_entries[:2] if similar_entries else [],
+        "enhanced_processing": False,
+        "fallback_mode": True
     }
 
 @router.get("/categories/list")

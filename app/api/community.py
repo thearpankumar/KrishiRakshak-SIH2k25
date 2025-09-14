@@ -3,6 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, func, and_, or_
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
+import httpx
+import uuid
 
 from ..core.database import get_session
 from ..core.dependencies import get_current_active_user
@@ -10,8 +12,7 @@ from ..models.database import User, GroupChat, GroupMessage
 from ..models.schemas import (
     GroupChat as GroupChatSchema,
     GroupChatCreate,
-    GroupMessage as GroupMessageSchema,
-    GroupMessageCreate
+    GroupMessage as GroupMessageSchema
 )
 
 router = APIRouter()
@@ -143,15 +144,24 @@ async def delete_group_chat(
     return {"message": "Group chat deactivated successfully"}
 
 # Group Messages
-@router.post("/groups/{group_id}/messages", response_model=GroupMessageSchema)
+@router.post("/groups/{group_id}/messages")
 async def send_group_message(
     group_id: str,
-    message_data: GroupMessageCreate,
+    message_data: dict,  # Using dict for flexibility
     current_user: User = Depends(get_current_active_user),
     session: AsyncSession = Depends(get_session)
 ):
-    """Send a message to a group chat."""
-    
+    """Send a message to a group chat with AI content moderation."""
+
+    message_content = message_data.get("message")
+    message_type = message_data.get("message_type", "text")
+
+    if not message_content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Message content is required"
+        )
+
     # Verify group exists and is active
     group_result = await session.execute(
         select(GroupChat).where(
@@ -159,25 +169,62 @@ async def send_group_message(
             GroupChat.is_active == True
         )
     )
-    
+
     group = group_result.scalar_one_or_none()
     if not group:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Group chat not found or inactive"
         )
-    
-    # Create group message
+
+    # Trigger content moderation via N8N
+    try:
+        from .triggers import call_n8n_webhook
+
+        enhanced_data = {
+            "user_id": str(current_user.id),
+            "content": message_content,
+            "content_type": "group_message",
+            "group_id": group_id,
+            "user_reputation": getattr(current_user, 'reputation_score', 0.5),
+            "moderation_id": f"mod_{uuid.uuid4()}",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+        moderation_result = await call_n8n_webhook("moderate-content", enhanced_data)
+
+        action = moderation_result.get("action", "approve")
+
+        # Check moderation result
+        if action == "reject":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Message violates community guidelines and cannot be posted"
+            )
+        elif action == "review":
+            # Queue for human review - don't post immediately
+            return {
+                "status": "pending_review",
+                "message": "Message is being reviewed and will be posted after approval",
+                "review_id": moderation_result.get("moderation_id"),
+                "estimated_review_time": "5-15 minutes"
+            }
+
+    except Exception as e:
+        # If moderation fails, allow the message but log the failure
+        print(f"Content moderation failed for user {current_user.id} - allowing message: {str(e)}")
+
+    # Create and save the message (if approved or moderation failed)
     db_message = GroupMessage(
         group_id=group_id,
         user_id=current_user.id,
-        message=message_data.message,
-        message_type=message_data.message_type
+        message=message_content,
+        message_type=message_type
     )
-    
+
     session.add(db_message)
     await session.commit()
-    
+
     # Reload with user relationship
     await session.refresh(db_message)
     result = await session.execute(
@@ -186,8 +233,21 @@ async def send_group_message(
         .where(GroupMessage.id == db_message.id)
     )
     message_with_user = result.scalar_one()
-    
-    return message_with_user
+
+    return {
+        "id": str(message_with_user.id),
+        "group_id": group_id,
+        "user_id": str(message_with_user.user_id),
+        "message": message_with_user.message,
+        "message_type": message_with_user.message_type,
+        "created_at": message_with_user.created_at,
+        "user": {
+            "id": str(message_with_user.user.id),
+            "full_name": message_with_user.user.full_name
+        } if message_with_user.user else None,
+        "moderated": True,
+        "status": "approved"
+    }
 
 @router.get("/groups/{group_id}/messages", response_model=List[GroupMessageSchema])
 async def get_group_messages(

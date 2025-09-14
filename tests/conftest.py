@@ -6,6 +6,7 @@ import pytest
 import asyncio
 import asyncpg
 from typing import AsyncGenerator
+from unittest.mock import AsyncMock, patch
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -97,7 +98,7 @@ def test_user_data():
 def test_profile_data():
     """Test farming profile data fixture."""
     return {
-        "crops_grown": ["rice", "wheat"],
+        "crop_types": ["rice", "wheat"],
         "farm_size": 5.5,
         "farming_experience": 10,
         "preferred_language": "malayalam"
@@ -162,3 +163,197 @@ def test_coordinates():
         "trivandrum_lat": 8.5241,
         "trivandrum_lng": 76.9366
     }
+
+
+# N8N Integration Testing Fixtures
+
+@pytest.fixture
+def mock_n8n_image_analysis_response():
+    """Mock N8N image analysis response."""
+    return {
+        "status": "success",
+        "ai_response": "This appears to be a healthy rice crop with good color and structure.",
+        "confidence_score": 0.85,
+        "analysis_id": "test-analysis-123",
+        "enhanced_processing": True,
+        "metadata": {
+            "model_used": "gpt-4o-mini",
+            "processing_time": "2024-01-15T10:30:00Z",
+            "local_context": "Kerala agricultural context applied",
+            "seasonal_factors": "Monsoon season considerations"
+        },
+        "treatment_plan": "Continue current care practices",
+        "prevention_measures": "Regular monitoring recommended"
+    }
+
+
+@pytest.fixture
+def mock_n8n_batch_response():
+    """Mock N8N batch analysis response."""
+    return {
+        "status": "processing",
+        "message": "Enhanced batch analysis started for 3 images",
+        "batch_size": 3,
+        "workflow_triggered": True,
+        "enhanced_processing": True
+    }
+
+
+@pytest.fixture
+def mock_n8n_chat_response():
+    """Mock N8N enhanced chat response."""
+    return {
+        "status": "enhanced_response",
+        "ai_response": "Based on your location in Kerala and current monsoon season, I recommend planting rice varieties like Jyothi or Pavizham which are well-suited for your region.",
+        "trust_score": 0.9,
+        "enhanced_processing": True,
+        "context_aware": True
+    }
+
+
+@pytest.fixture
+def mock_n8n_knowledge_response():
+    """Mock N8N knowledge processing response."""
+    return {
+        "answer": "For rice cultivation in Kerala during monsoon season, use NPK fertilizer in 4:2:1 ratio. Apply 60kg nitrogen, 30kg phosphorus, and 15kg potassium per acre.",
+        "source": "enhanced_ai",
+        "trust_score": 0.88,
+        "enhanced_processing": True,
+        "saved_to_kb": True
+    }
+
+
+@pytest.fixture
+def mock_n8n_moderation_response():
+    """Mock N8N content moderation response."""
+    return {
+        "action": "approve",
+        "confidence_score": 0.95,
+        "reasons": ["Content is helpful and appropriate"],
+        "moderation_id": "mod-123-456"
+    }
+
+
+@pytest.fixture
+def mock_n8n_webhook_response():
+    """Mock N8N webhook callback response."""
+    return {
+        "status": "success",
+        "analysis_id": "webhook-test-789",
+        "results": {
+            "primary_analysis": "Healthy crop identified",
+            "confidence_score": 0.87,
+            "severity_level": "low",
+            "enhanced_analysis": True
+        },
+        "recommendations": ["Continue current practices", "Monitor for pests"],
+        "metadata": {
+            "enhanced_by_n8n": True,
+            "workflow_version": "1.0"
+        }
+    }
+
+
+@pytest.fixture
+def mock_httpx_client():
+    """Mock httpx.AsyncClient for N8N requests."""
+
+    class MockResponse:
+        def __init__(self, json_data, status_code=200):
+            self._json_data = json_data
+            self.status_code = status_code
+
+        def json(self):
+            return self._json_data
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise Exception(f"HTTP {self.status_code}")
+
+    class MockAsyncClient:
+        def __init__(self, responses=None):
+            self.responses = responses or {}
+            self.requests = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, url, **kwargs):
+            # Log the request for testing
+            self.requests.append({
+                "url": url,
+                "method": "POST",
+                "kwargs": kwargs
+            })
+
+            # Return appropriate mock response based on URL
+            if "analyze-image" in url:
+                return MockResponse({
+                    "status": "processing",
+                    "message": "Enhanced image analysis started",
+                    "workflow_triggered": True,
+                    "enhanced_processing": True
+                })
+            elif "batch-analyze" in url:
+                return MockResponse({
+                    "status": "processing",
+                    "message": "Enhanced batch analysis started for 3 images",
+                    "batch_size": 3,
+                    "workflow_triggered": True
+                })
+            elif "enhance-chat" in url:
+                return MockResponse({
+                    "ai_response": "This is a mock enhanced AI response for testing.",
+                    "trust_score": 0.85,
+                    "enhanced_processing": True
+                })
+            elif "moderate-content" in url:
+                return MockResponse({
+                    "action": "approve",
+                    "moderation_id": "test-mod-123"
+                })
+            elif "process-knowledge-query" in url:
+                return MockResponse({
+                    "ai_response": "Mock knowledge response for testing",
+                    "trust_score": 0.9,
+                    "saved_to_kb": True
+                })
+            else:
+                return MockResponse({"status": "success"})
+
+    return MockAsyncClient
+
+
+@pytest.fixture
+def mock_n8n_integration():
+    """Fixture to mock all N8N integrations."""
+    with patch("httpx.AsyncClient") as mock_client:
+        mock_instance = AsyncMock()
+        mock_client.return_value.__aenter__.return_value = mock_instance
+        mock_client.return_value.__aexit__ = AsyncMock()
+
+        # Configure mock responses
+        mock_instance.post.return_value.status_code = 200
+        mock_instance.post.return_value.json.return_value = {
+            "status": "success",
+            "enhanced_processing": True
+        }
+
+        yield mock_instance
+
+
+@pytest.fixture
+def n8n_fallback_mode():
+    """Fixture to simulate N8N being unavailable (fallback mode)."""
+    with patch("httpx.AsyncClient") as mock_client:
+        mock_instance = AsyncMock()
+        mock_client.return_value.__aenter__.return_value = mock_instance
+        mock_client.return_value.__aexit__ = AsyncMock()
+
+        # Simulate N8N being unavailable
+        mock_instance.post.side_effect = Exception("N8N service unavailable")
+
+        yield mock_instance

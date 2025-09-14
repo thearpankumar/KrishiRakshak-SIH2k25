@@ -1,11 +1,12 @@
 """
-Tests for Knowledge Repository API endpoints.
+Tests for Knowledge Repository API endpoints with N8N integration.
 """
 
 import pytest
 import requests
 import json
 from typing import Dict, Any, Optional
+from unittest.mock import patch, AsyncMock
 from test_container_endpoints import TestConfig
 
 
@@ -385,30 +386,107 @@ class TestKnowledgeRepositoryEndpoints:
         assert response.status_code == 422  # Validation error
     
     def test_ask_ai_question(self):
-        """Test asking a question to AI with knowledge base integration."""
-        
-        ai_question = "How do I prevent fungal diseases in rice crops during monsoon?"
-        
-        response = self._make_authenticated_request(
-            'POST',
-            f'/api/v1/knowledge/ask-ai?question={ai_question}&crop_type=rice&language=english'
-        )
-        
-        assert response.status_code == 200
-        ai_result = response.json()
-        
-        assert 'answer' in ai_result
-        assert 'source' in ai_result
-        assert ai_result['source'] in ['knowledge_base', 'ai_generated']
-        
-        # Should have trust score for AI-generated responses
-        if ai_result['source'] == 'ai_generated':
+        """Test asking a question to AI with N8N enhanced knowledge processing."""
+
+        with patch('httpx.AsyncClient') as mock_client:
+            # Setup mock N8N knowledge processing response
+            mock_instance = AsyncMock()
+            mock_client.return_value.__aenter__.return_value = mock_instance
+            mock_client.return_value.__aexit__ = AsyncMock()
+
+            mock_response = AsyncMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "ai_response": "For preventing fungal diseases in rice during monsoon, use resistant varieties like Jyothi, ensure proper drainage, apply propiconazole fungicide, and maintain field sanitation.",
+                "trust_score": 0.92,
+                "saved_to_kb": True
+            }
+            mock_instance.post.return_value = mock_response
+
+            ai_question = "How do I prevent fungal diseases in rice crops during monsoon?"
+
+            response = self._make_authenticated_request(
+                'POST',
+                f'/api/v1/knowledge/ask-ai?question={ai_question}&crop_type=rice&language=english'
+            )
+
+            assert response.status_code == 200
+            ai_result = response.json()
+
+            assert 'answer' in ai_result
+            assert 'source' in ai_result
+            assert ai_result['source'] == 'enhanced_ai'
+            assert ai_result['enhanced_processing'] == True
             assert 'trust_score' in ai_result
             assert isinstance(ai_result['trust_score'], (int, float))
-        
-        # Should include similar questions if any found
-        if 'similar_questions' in ai_result:
-            assert isinstance(ai_result['similar_questions'], list)
+            assert ai_result['saved_to_kb'] == True
+
+            # Verify N8N was called
+            mock_instance.post.assert_called_once()
+
+    def test_ask_ai_question_fallback(self):
+        """Test asking AI question when N8N is unavailable (fallback mode)."""
+
+        with patch('httpx.AsyncClient') as mock_client:
+            # Setup mock to simulate N8N unavailable
+            mock_instance = AsyncMock()
+            mock_client.return_value.__aenter__.return_value = mock_instance
+            mock_client.return_value.__aexit__ = AsyncMock()
+
+            # Simulate N8N service unavailable
+            import httpx
+            mock_instance.post.side_effect = httpx.RequestError("N8N knowledge service unavailable")
+
+            ai_question = "What's the best fertilizer for tomato plants?"
+
+            response = self._make_authenticated_request(
+                'POST',
+                f'/api/v1/knowledge/ask-ai?question={ai_question}&crop_type=tomato&language=english'
+            )
+
+            assert response.status_code == 200
+            ai_result = response.json()
+
+            assert 'answer' in ai_result
+            assert 'source' in ai_result
+            assert ai_result['source'] == 'fallback'
+            assert ai_result['enhanced_processing'] == False
+            assert ai_result['fallback_mode'] == True
+            assert 'trust_score' in ai_result
+
+            # Verify N8N was attempted
+            mock_instance.post.assert_called_once()
+
+    def test_ask_ai_with_knowledge_base_match(self):
+        """Test AI question when knowledge base has similar entries."""
+
+        # First, let's assume there are similar questions in the knowledge base
+        # This would simulate the vector search finding high-similarity matches
+
+        ai_question = "What is the best fertilizer for rice crops?"
+
+        # Mock both vector service and N8N (if needed)
+        with patch('app.services.vector_service.vector_service.search_similar_questions') as mock_vector:
+            # Mock high similarity match - should return from knowledge base
+            mock_vector.return_value = [{
+                "qa_id": "test-123",
+                "answer": "NPK fertilizer with 4:2:1 ratio works well for rice crops in Kerala.",
+                "similarity_score": 0.95
+            }]
+
+            response = self._make_authenticated_request(
+                'POST',
+                f'/api/v1/knowledge/ask-ai?question={ai_question}&crop_type=rice&language=english'
+            )
+
+            assert response.status_code == 200
+            ai_result = response.json()
+
+            # Should return from knowledge base without calling N8N
+            assert ai_result['source'] == 'knowledge_base'
+            assert ai_result['enhanced_processing'] == False
+            assert 'similarity_score' in ai_result
+            assert ai_result['similarity_score'] == 0.95
     
     def test_get_categories_list(self):
         """Test retrieving available categories."""

@@ -1,0 +1,409 @@
+{
+  "name": "Weather & Market Data Integration Workflow",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Scheduled Data Sync",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 300],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "2",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [200, 500],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "weather-market-sync",
+        "responseMode": "lastNode",
+        "options": {
+          "allowedOrigins": "http://localhost:8000"
+        }
+      },
+      "webhookId": "weather-market-sync"
+    },
+    {
+      "id": "3",
+      "name": "Get Active Locations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [400, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8000/api/v1/admin/active-locations",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Request",
+              "value": "n8n-weather-sync"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "4",
+      "name": "Split Locations",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [600, 300],
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      }
+    },
+    {
+      "id": "5",
+      "name": "Process Location Batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Process batch of locations for weather and market data\nconst locations = $input.first().json.locations || [];\nconst currentBatch = $input.first().json;\n\n// Get current batch of locations\nconst batchStart = $runIndex * 5;\nconst batchEnd = batchStart + 5;\nconst locationBatch = locations.slice(batchStart, batchEnd);\n\nif (locationBatch.length === 0) {\n  throw new Error('No locations to process in this batch');\n}\n\n// Kerala districts and major towns\nconst locationData = locationBatch.map(location => ({\n  name: location.name || location,\n  lat: location.lat || getKeralaCoordinates(location.name || location).lat,\n  lon: location.lon || getKeralaCoordinates(location.name || location).lon,\n  district: location.district || inferDistrict(location.name || location)\n}));\n\n// Helper function to get Kerala coordinates\nfunction getKeralaCoordinates(locationName) {\n  const keralaCoords = {\n    'thiruvananthapuram': { lat: 8.5241, lon: 76.9366 },\n    'kollam': { lat: 8.8932, lon: 76.6141 },\n    'pathanamthitta': { lat: 9.2648, lon: 76.7870 },\n    'alappuzha': { lat: 9.4981, lon: 76.3388 },\n    'kottayam': { lat: 9.5916, lon: 76.5222 },\n    'idukki': { lat: 9.8560, lon: 76.9774 },\n    'ernakulam': { lat: 9.9312, lon: 76.2673 },\n    'thrissur': { lat: 10.5276, lon: 76.2144 },\n    'palakkad': { lat: 10.7867, lon: 76.6548 },\n    'malappuram': { lat: 11.0410, lon: 76.0788 },\n    'kozhikode': { lat: 11.2588, lon: 75.7804 },\n    'wayanad': { lat: 11.6854, lon: 76.1320 },\n    'kannur': { lat: 11.8745, lon: 75.3704 },\n    'kasaragod': { lat: 12.4996, lon: 74.9869 },\n    'cochin': { lat: 9.9312, lon: 76.2673 },\n    'munnar': { lat: 10.0889, lon: 77.0595 }\n  };\n  \n  const key = locationName.toLowerCase().replace(/\\s+/g, '');\n  return keralaCoords[key] || { lat: 10.8505, lon: 76.2711 }; // Default to Kerala center\n}\n\nfunction inferDistrict(locationName) {\n  const districts = {\n    'thiruvananthapuram': 'Thiruvananthapuram',\n    'kollam': 'Kollam',\n    'pathanamthitta': 'Pathanamthitta',\n    'alappuzha': 'Alappuzha',\n    'kottayam': 'Kottayam',\n    'idukki': 'Idukki',\n    'ernakulam': 'Ernakulam',\n    'cochin': 'Ernakulam',\n    'thrissur': 'Thrissur',\n    'palakkad': 'Palakkad',\n    'malappuram': 'Malappuram',\n    'kozhikode': 'Kozhikode',\n    'wayanad': 'Wayanad',\n    'kannur': 'Kannur',\n    'kasaragod': 'Kasaragod'\n  };\n  \n  const key = locationName.toLowerCase().replace(/\\s+/g, '');\n  return districts[key] || 'Kerala';\n}\n\nreturn {\n  json: {\n    batch_id: `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,\n    locations: locationData,\n    total_locations: locationData.length,\n    sync_timestamp: new Date().toISOString()\n  }\n};"
+      }
+    },
+    {
+      "id": "6",
+      "name": "Fetch Weather Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 200],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.openweathermap.org/data/2.5/weather?lat={{ $json.locations[0].lat }}&lon={{ $json.locations[0].lon }}&appid={{$vars.OPENWEATHER_API_KEY}}&units=metric",
+        "authentication": "none",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "lat",
+              "value": "={{ $json.locations[0].lat }}"
+            },
+            {
+              "name": "lon",
+              "value": "={{ $json.locations[0].lon }}"
+            },
+            {
+              "name": "appid",
+              "value": "={{$vars.OPENWEATHER_API_KEY}}"
+            },
+            {
+              "name": "units",
+              "value": "metric"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "retry": {
+            "enabled": true,
+            "maxRetries": 3,
+            "waitBetweenRetries": 2000
+          }
+        }
+      }
+    },
+    {
+      "id": "7",
+      "name": "Fetch Market Prices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 400],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070",
+        "authentication": "none",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "api-key",
+              "value": "{{$vars.DATA_GOV_IN_API_KEY}}"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            },
+            {
+              "name": "filters[state]",
+              "value": "Kerala"
+            },
+            {
+              "name": "limit",
+              "value": "50"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000,
+          "retry": {
+            "enabled": true,
+            "maxRetries": 3,
+            "waitBetweenRetries": 3000
+          }
+        }
+      }
+    },
+    {
+      "id": "8",
+      "name": "Process Weather Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 200],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Process and structure weather data\nconst locationBatch = $('Process Location Batch').first().json;\nconst weatherData = $input.first().json;\n\n// Structure weather information\nconst processedWeather = {\n  location: locationBatch.locations[0],\n  weather: {\n    temperature: {\n      current: Math.round(weatherData.main?.temp || 0),\n      feels_like: Math.round(weatherData.main?.feels_like || 0),\n      min: Math.round(weatherData.main?.temp_min || 0),\n      max: Math.round(weatherData.main?.temp_max || 0)\n    },\n    humidity: weatherData.main?.humidity || 0,\n    pressure: weatherData.main?.pressure || 0,\n    weather_condition: {\n      main: weatherData.weather?.[0]?.main || 'Unknown',\n      description: weatherData.weather?.[0]?.description || 'No data',\n      icon: weatherData.weather?.[0]?.icon || '01d'\n    },\n    wind: {\n      speed: weatherData.wind?.speed || 0,\n      direction: weatherData.wind?.deg || 0\n    },\n    visibility: weatherData.visibility || 0,\n    clouds: weatherData.clouds?.all || 0,\n    sunrise: weatherData.sys?.sunrise ? new Date(weatherData.sys.sunrise * 1000).toISOString() : null,\n    sunset: weatherData.sys?.sunset ? new Date(weatherData.sys.sunset * 1000).toISOString() : null\n  },\n  agricultural_insights: generateAgricultureInsights(weatherData),\n  alerts: generateWeatherAlerts(weatherData),\n  fetched_at: new Date().toISOString()\n};\n\nfunction generateAgricultureInsights(data) {\n  const insights = [];\n  const temp = data.main?.temp || 0;\n  const humidity = data.main?.humidity || 0;\n  const condition = data.weather?.[0]?.main || '';\n  \n  // Temperature insights\n  if (temp < 15) {\n    insights.push('Cold weather - protect sensitive crops, consider frost protection');\n  } else if (temp > 35) {\n    insights.push('Hot weather - ensure adequate irrigation, provide shade for livestock');\n  } else if (temp >= 25 && temp <= 32) {\n    insights.push('Optimal temperature for most tropical crops');\n  }\n  \n  // Humidity insights\n  if (humidity > 80) {\n    insights.push('High humidity - monitor for fungal diseases, improve ventilation');\n  } else if (humidity < 40) {\n    insights.push('Low humidity - increase irrigation frequency, mulch soil');\n  }\n  \n  // Weather condition insights\n  if (condition.includes('Rain')) {\n    insights.push('Rainy conditions - avoid spraying, check drainage systems');\n  } else if (condition.includes('Clear')) {\n    insights.push('Clear weather - good for outdoor activities, harvesting');\n  }\n  \n  return insights;\n}\n\nfunction generateWeatherAlerts(data) {\n  const alerts = [];\n  const temp = data.main?.temp || 0;\n  const windSpeed = data.wind?.speed || 0;\n  const condition = data.weather?.[0]?.main || '';\n  \n  // Temperature alerts\n  if (temp < 10) {\n    alerts.push({ level: 'high', message: 'Frost warning - protect crops and livestock' });\n  } else if (temp > 40) {\n    alerts.push({ level: 'high', message: 'Extreme heat - ensure water supply and shade' });\n  }\n  \n  // Wind alerts\n  if (windSpeed > 10) {\n    alerts.push({ level: 'medium', message: 'Strong winds - secure loose structures' });\n  }\n  \n  // Precipitation alerts\n  if (condition.includes('Thunder')) {\n    alerts.push({ level: 'high', message: 'Thunderstorm warning - avoid outdoor activities' });\n  }\n  \n  return alerts;\n}\n\nreturn { json: processedWeather };"
+      }
+    },
+    {
+      "id": "9",
+      "name": "Process Market Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 400],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Process and structure market price data\nconst locationBatch = $('Process Location Batch').first().json;\nconst marketData = $input.first().json;\n\n// Extract and process market records\nconst records = marketData.records || [];\nconst todayDate = new Date().toISOString().split('T')[0];\n\n// Filter and process relevant crops for Kerala\nconst keralaCrops = ['rice', 'coconut', 'pepper', 'cardamom', 'rubber', 'tea', 'coffee', 'banana', 'tapioca', 'ginger', 'turmeric'];\n\nconst processedMarketData = {\n  location: locationBatch.locations[0],\n  market_prices: records\n    .filter(record => {\n      // Filter for Kerala and relevant crops\n      const cropName = (record.commodity || '').toLowerCase();\n      return keralaCrops.some(crop => cropName.includes(crop));\n    })\n    .map(record => ({\n      commodity: record.commodity || 'Unknown',\n      variety: record.variety || 'General',\n      market: record.market || 'General Market',\n      price_per_unit: {\n        min: parseFloat(record.min_price) || 0,\n        max: parseFloat(record.max_price) || 0,\n        modal: parseFloat(record.modal_price) || 0\n      },\n      unit: record.grade || 'Quintal',\n      arrival_date: record.arrival_date || todayDate,\n      district: record.district || locationBatch.locations[0].district\n    })\n    .slice(0, 20), // Limit to top 20 relevant entries\n  \n  price_trends: generatePriceTrends(records),\n  recommendations: generateMarketRecommendations(records),\n  \n  summary: {\n    total_commodities: records.length,\n    kerala_relevant: records.filter(r => \n      keralaCrops.some(crop => (r.commodity || '').toLowerCase().includes(crop))\n    ).length,\n    last_updated: new Date().toISOString()\n  }\n};\n\nfunction generatePriceTrends(records) {\n  const trends = [];\n  const commodityGroups = {};\n  \n  // Group by commodity\n  records.forEach(record => {\n    const commodity = record.commodity || 'Unknown';\n    if (!commodityGroups[commodity]) {\n      commodityGroups[commodity] = [];\n    }\n    commodityGroups[commodity].push({\n      price: parseFloat(record.modal_price) || 0,\n      date: record.arrival_date\n    });\n  });\n  \n  // Analyze trends for major commodities\n  Object.keys(commodityGroups).slice(0, 10).forEach(commodity => {\n    const prices = commodityGroups[commodity];\n    if (prices.length > 1) {\n      const avgPrice = prices.reduce((sum, p) => sum + p.price, 0) / prices.length;\n      trends.push({\n        commodity: commodity,\n        average_price: Math.round(avgPrice),\n        data_points: prices.length,\n        trend_direction: 'stable' // Simplified - could be enhanced with actual trend calculation\n      });\n    }\n  });\n  \n  return trends;\n}\n\nfunction generateMarketRecommendations(records) {\n  const recommendations = [];\n  \n  // High-value crop recommendations\n  const highValueCrops = records\n    .filter(r => parseFloat(r.modal_price) > 5000)\n    .map(r => r.commodity)\n    .slice(0, 5);\n  \n  if (highValueCrops.length > 0) {\n    recommendations.push({\n      type: 'high_value_opportunity',\n      message: `Consider growing high-value crops: ${highValueCrops.join(', ')}`,\n      priority: 'medium'\n    });\n  }\n  \n  // Seasonal recommendations\n  const currentMonth = new Date().getMonth() + 1;\n  if (currentMonth >= 6 && currentMonth <= 9) {\n    recommendations.push({\n      type: 'seasonal',\n      message: 'Monsoon season - focus on rice, coconut, and spices marketing',\n      priority: 'high'\n    });\n  } else if (currentMonth >= 12 || currentMonth <= 2) {\n    recommendations.push({\n      type: 'seasonal',\n      message: 'Post-harvest season - good time for bulk sales and storage',\n      priority: 'medium'\n    });\n  }\n  \n  return recommendations;\n}\n\nreturn { json: processedMarketData };"
+      }
+    },
+    {
+      "id": "10",
+      "name": "Combine Weather & Market Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Combine weather and market data for comprehensive insights\nconst weatherData = $('Process Weather Data').first().json;\nconst marketData = $('Process Market Data').first().json;\n\n// Cross-reference weather and market conditions\nconst combinedInsights = generateCombinedInsights(weatherData, marketData);\n\nconst combinedReport = {\n  location: weatherData.location,\n  sync_id: `sync_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,\n  \n  weather: weatherData.weather,\n  market_prices: marketData.market_prices,\n  \n  agricultural_insights: {\n    weather_insights: weatherData.agricultural_insights,\n    market_insights: marketData.recommendations,\n    combined_insights: combinedInsights\n  },\n  \n  alerts: {\n    weather_alerts: weatherData.alerts,\n    market_alerts: generateMarketAlerts(marketData, weatherData)\n  },\n  \n  actionable_recommendations: generateActionableRecommendations(weatherData, marketData),\n  \n  data_freshness: {\n    weather_updated: weatherData.fetched_at,\n    market_updated: marketData.summary.last_updated,\n    report_generated: new Date().toISOString()\n  }\n};\n\nfunction generateCombinedInsights(weather, market) {\n  const insights = [];\n  const temp = weather.weather?.temperature?.current || 0;\n  const condition = weather.weather?.weather_condition?.main || '';\n  const highValueCrops = market.market_prices\n    .filter(p => p.price_per_unit.modal > 3000)\n    .map(p => p.commodity);\n  \n  // Weather-market correlation insights\n  if (condition.includes('Rain') && highValueCrops.includes('pepper')) {\n    insights.push('Rainy weather may affect pepper drying - consider covered storage');\n  }\n  \n  if (temp > 30 && highValueCrops.includes('coconut')) {\n    insights.push('Hot weather favorable for coconut - good time to harvest and sell');\n  }\n  \n  if (weather.weather?.humidity > 70) {\n    insights.push('High humidity conditions - monitor stored produce for spoilage');\n  }\n  \n  return insights;\n}\n\nfunction generateMarketAlerts(market, weather) {\n  const alerts = [];\n  const avgPriceChange = 0; // Simplified - would need historical data\n  \n  // Price volatility alerts\n  const highPriceCrops = market.market_prices.filter(p => p.price_per_unit.modal > 5000);\n  if (highPriceCrops.length > 0) {\n    alerts.push({\n      level: 'medium',\n      message: `High prices detected for: ${highPriceCrops.map(c => c.commodity).join(', ')}`\n    });\n  }\n  \n  // Weather impact on market alerts\n  if (weather.weather?.weather_condition?.main?.includes('Rain')) {\n    alerts.push({\n      level: 'medium',\n      message: 'Rain may affect transportation and market accessibility'\n    });\n  }\n  \n  return alerts;\n}\n\nfunction generateActionableRecommendations(weather, market) {\n  const recommendations = [];\n  const temp = weather.weather?.temperature?.current || 0;\n  const condition = weather.weather?.weather_condition?.main || '';\n  \n  // Immediate actions based on weather\n  if (temp > 35) {\n    recommendations.push({\n      priority: 'high',\n      action: 'Ensure adequate water supply for crops and livestock',\n      category: 'weather_response'\n    });\n  }\n  \n  if (condition.includes('Rain')) {\n    recommendations.push({\n      priority: 'medium',\n      action: 'Postpone pesticide/fertilizer applications',\n      category: 'weather_response'\n    });\n  }\n  \n  // Market-based actions\n  const topPriceCrops = market.market_prices\n    .sort((a, b) => b.price_per_unit.modal - a.price_per_unit.modal)\n    .slice(0, 3);\n  \n  if (topPriceCrops.length > 0) {\n    recommendations.push({\n      priority: 'medium',\n      action: `Consider selling: ${topPriceCrops.map(c => c.commodity).join(', ')} - currently high prices`,\n      category: 'market_opportunity'\n    });\n  }\n  \n  return recommendations;\n}\n\nreturn { json: combinedReport };"
+      }
+    },
+    {
+      "id": "11",
+      "name": "Send to Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1600, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/v1/webhooks/weather-market-update",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Workflow-Source",
+              "value": "n8n-weather-market"
+            },
+            {
+              "name": "X-Data-Type",
+              "value": "weather-market-combined"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonParameters": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000,
+          "retry": {
+            "enabled": true,
+            "maxRetries": 5,
+            "waitBetweenRetries": 3000
+          }
+        }
+      }
+    },
+    {
+      "id": "12",
+      "name": "Update Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1800, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: 'success',\n  message: 'Weather and market data updated successfully',\n  sync_id: $json.sync_id,\n  location: $json.location.name,\n  weather_condition: $json.weather.weather_condition.description,\n  market_commodities: $json.market_prices.length,\n  insights_count: $json.agricultural_insights.combined_insights.length,\n  recommendations_count: $json.actionable_recommendations.length,\n  updated_at: $json.data_freshness.report_generated\n}) }}"
+      }
+    },
+    {
+      "id": "13",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1000, 600],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: 'error',\n  message: 'Weather/market data sync failed',\n  error: $json.error?.message || $json.message || 'Unknown error occurred',\n  timestamp: new Date().toISOString()\n}) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Scheduled Data Sync": {
+      "main": [
+        [
+          {
+            "node": "Get Active Locations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Active Locations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Locations": {
+      "main": [
+        [
+          {
+            "node": "Split Locations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Locations": {
+      "main": [
+        [
+          {
+            "node": "Process Location Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Location Batch": {
+      "main": [
+        [
+          {
+            "node": "Fetch Weather Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Market Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Weather Data": {
+      "main": [
+        [
+          {
+            "node": "Process Weather Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Market Prices": {
+      "main": [
+        [
+          {
+            "node": "Process Market Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Weather Data": {
+      "main": [
+        [
+          {
+            "node": "Combine Weather & Market Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Market Data": {
+      "main": [
+        [
+          {
+            "node": "Combine Weather & Market Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Weather & Market Data": {
+      "main": [
+        [
+          {
+            "node": "Send to Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Backend": {
+      "main": [
+        [
+          {
+            "node": "Update Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": {},
+  "tags": [
+    {
+      "createdAt": "2025-01-15T00:00:00.000Z",
+      "updatedAt": "2025-01-15T00:00:00.000Z",
+      "id": "weather-market-data",
+      "name": "weather-market-data"
+    }
+  ],
+  "triggerCount": 2,
+  "active": false,
+  "id": "4"
+}

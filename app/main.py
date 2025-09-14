@@ -65,7 +65,7 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 # Include routers
-from .api import auth, chat, analysis, community, location, knowledge, upload
+from .api import auth, chat, analysis, community, location, knowledge, upload, triggers, webhooks
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["authentication"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
 app.include_router(analysis.router, prefix="/api/v1/analysis", tags=["analysis"])
@@ -73,6 +73,8 @@ app.include_router(community.router, prefix="/api/v1/community", tags=["communit
 app.include_router(location.router, prefix="/api/v1/location", tags=["location"])
 app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
 app.include_router(upload.router, prefix="/api/v1/upload", tags=["upload"])
+app.include_router(triggers.router, prefix="/api/v1/triggers", tags=["n8n-triggers"])
+app.include_router(webhooks.router, prefix="/api/v1/webhooks", tags=["n8n-webhooks"])
 
 @app.get("/")
 async def root():

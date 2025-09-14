@@ -1,0 +1,292 @@
+{
+  "name": "Batch Image Analysis Workflow",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Batch Analysis Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [200, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "batch-analysis",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "http://localhost:8000"
+        }
+      },
+      "webhookId": "batch-analysis-webhook"
+    },
+    {
+      "id": "2",
+      "name": "Validate Batch Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Validate batch analysis input\nconst input = $input.first().json;\n\n// Check required fields\nif (!input.images || !Array.isArray(input.images) || !input.analysis_type || !input.user_id) {\n  throw new Error('Missing required fields: images (array), analysis_type, user_id');\n}\n\n// Validate batch size\nif (input.images.length === 0) {\n  throw new Error('Images array cannot be empty');\n}\n\nif (input.images.length > 20) {\n  throw new Error('Maximum 20 images allowed per batch');\n}\n\n// Validate analysis type\nconst validTypes = ['crop', 'pest', 'disease', 'soil'];\nif (!validTypes.includes(input.analysis_type)) {\n  throw new Error(`Invalid analysis_type. Must be one of: ${validTypes.join(', ')}`);\n}\n\n// Validate each image in the batch\ninput.images.forEach((image, index) => {\n  if (!image.image_path || !image.filename) {\n    throw new Error(`Image at index ${index} missing image_path or filename`);\n  }\n});\n\nreturn {\n  json: {\n    ...input,\n    validated: true,\n    batch_id: `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,\n    total_images: input.images.length,\n    timestamp: new Date().toISOString()\n  }\n};"
+      }
+    },
+    {
+      "id": "3",
+      "name": "Split Batch",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [600, 300],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "4",
+      "name": "Process Single Image",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Process individual image from batch\nconst batchData = $('Validate Batch Input').first().json;\nconst currentBatch = $input.first().json;\n\n// Get current image from the batch\nconst currentIndex = $runIndex;\nconst currentImage = batchData.images[currentIndex];\n\nif (!currentImage) {\n  throw new Error(`No image found at index ${currentIndex}`);\n}\n\nreturn {\n  json: {\n    user_id: batchData.user_id,\n    analysis_type: batchData.analysis_type,\n    image_path: currentImage.image_path,\n    filename: currentImage.filename,\n    batch_id: batchData.batch_id,\n    image_index: currentIndex,\n    total_images: batchData.total_images,\n    timestamp: new Date().toISOString()\n  }\n};"
+      }
+    },
+    {
+      "id": "5",
+      "name": "AI Analysis Per Image",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [1000, 300],
+      "parameters": {
+        "resource": "assistant",
+        "operation": "message",
+        "message": "=Analyze this {{ $json.analysis_type }} image ({{ $json.filename }}): {{ $json.image_path }}.\n\nProvide concise but comprehensive analysis for Kerala farming:\n1. Primary Finding: Main identification/issue\n2. Confidence: Rate 0-1\n3. Severity: low/medium/high/critical\n4. Key Recommendations: Top 2-3 actions\n5. Treatment: Essential steps only\n6. Risk Level: immediate/short-term/long-term\n\nFormat as JSON for batch processing efficiency.",
+        "options": {
+          "model": "gpt-4o-mini",
+          "maxTokens": 600,
+          "temperature": 0.1
+        }
+      },
+      "credentials": {
+        "openAiApi": "openai-credentials"
+      }
+    },
+    {
+      "id": "6",
+      "name": "Structure Individual Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Structure individual analysis result\nconst imageData = $('Process Single Image').first().json;\nconst aiResponse = $input.first().json;\n\nlet analysis;\ntry {\n  const content = aiResponse.choices?.[0]?.message?.content || aiResponse.content || aiResponse.text;\n  analysis = JSON.parse(content);\n} catch (e) {\n  // Fallback structure\n  const content = aiResponse.choices?.[0]?.message?.content || aiResponse.content || 'Analysis completed';\n  analysis = {\n    primary_finding: content.substring(0, 200),\n    confidence: 0.7,\n    severity: 'medium',\n    key_recommendations: ['Review with agricultural expert'],\n    treatment: 'Standard treatment recommended',\n    risk_level: 'short-term'\n  };\n}\n\nconst result = {\n  batch_id: imageData.batch_id,\n  user_id: imageData.user_id,\n  image_index: imageData.image_index,\n  filename: imageData.filename,\n  image_path: imageData.image_path,\n  analysis_type: imageData.analysis_type,\n  results: {\n    primary_finding: analysis.primary_finding || analysis.analysis || 'Analysis completed',\n    confidence_score: analysis.confidence || 0.7,\n    severity_level: analysis.severity || 'medium',\n    risk_level: analysis.risk_level || 'short-term'\n  },\n  recommendations: Array.isArray(analysis.key_recommendations) ? analysis.key_recommendations : [analysis.key_recommendations || 'Standard recommendations'],\n  treatment_plan: analysis.treatment || 'Treatment plan pending',\n  confidence_score: analysis.confidence || 0.7,\n  processed_at: new Date().toISOString(),\n  status: 'completed'\n};\n\nreturn { json: result };"
+      }
+    },
+    {
+      "id": "7",
+      "name": "Collect Results",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [1400, 300],
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      }
+    },
+    {
+      "id": "8",
+      "name": "Compile Batch Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1600, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Compile comprehensive batch analysis report\nconst allResults = $input.all().map(item => item.json);\nconst firstResult = allResults[0];\n\nif (!firstResult) {\n  throw new Error('No results to compile');\n}\n\n// Calculate batch statistics\nconst totalImages = allResults.length;\nconst successfulAnalyses = allResults.filter(r => r.status === 'completed').length;\nconst averageConfidence = allResults.reduce((sum, r) => sum + (r.confidence_score || 0), 0) / totalImages;\n\n// Categorize by severity\nconst severityCounts = {\n  low: allResults.filter(r => r.results?.severity_level === 'low').length,\n  medium: allResults.filter(r => r.results?.severity_level === 'medium').length,\n  high: allResults.filter(r => r.results?.severity_level === 'high').length,\n  critical: allResults.filter(r => r.results?.severity_level === 'critical').length\n};\n\n// Identify high-priority issues\nconst criticalIssues = allResults.filter(r => \n  r.results?.severity_level === 'critical' || \n  r.results?.risk_level === 'immediate'\n);\n\n// Compile all recommendations\nconst allRecommendations = allResults.flatMap(r => r.recommendations || [])\n  .filter(rec => rec && rec.length > 0);\n\n// Remove duplicates and get top recommendations\nconst uniqueRecommendations = [...new Set(allRecommendations)];\n\nconst batchReport = {\n  batch_id: firstResult.batch_id,\n  user_id: firstResult.user_id,\n  analysis_type: firstResult.analysis_type,\n  batch_summary: {\n    total_images: totalImages,\n    successful_analyses: successfulAnalyses,\n    failed_analyses: totalImages - successfulAnalyses,\n    average_confidence: Math.round(averageConfidence * 100) / 100,\n    processing_time: new Date().toISOString()\n  },\n  severity_distribution: severityCounts,\n  critical_issues: {\n    count: criticalIssues.length,\n    details: criticalIssues.map(issue => ({\n      filename: issue.filename,\n      finding: issue.results?.primary_finding,\n      severity: issue.results?.severity_level,\n      risk_level: issue.results?.risk_level,\n      recommendations: issue.recommendations\n    }))\n  },\n  consolidated_recommendations: uniqueRecommendations.slice(0, 10), // Top 10 unique recommendations\n  individual_results: allResults,\n  status: 'completed',\n  generated_at: new Date().toISOString()\n};\n\nreturn { json: batchReport };"
+      }
+    },
+    {
+      "id": "9",
+      "name": "Send Batch Results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1800, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/v1/webhooks/batch-complete",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Workflow-Source",
+              "value": "n8n-batch-analysis"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "data",
+              "value": "={{ $json }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000,
+          "retry": {
+            "enabled": true,
+            "maxRetries": 5,
+            "waitBetweenRetries": 2000
+          }
+        }
+      }
+    },
+    {
+      "id": "10",
+      "name": "Batch Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [2000, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: 'success',\n  message: 'Batch analysis completed successfully',\n  batch_id: $json.batch_id,\n  total_processed: $json.batch_summary.total_images,\n  successful: $json.batch_summary.successful_analyses,\n  failed: $json.batch_summary.failed_analyses,\n  critical_issues: $json.critical_issues.count,\n  average_confidence: $json.batch_summary.average_confidence,\n  processing_completed_at: $json.generated_at\n}) }}"
+      }
+    },
+    {
+      "id": "11",
+      "name": "Batch Error Handler",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1000, 500],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: 'error',\n  message: 'Batch analysis failed',\n  batch_id: $json.batch_id || 'unknown',\n  error: $json.error?.message || $json.message || 'Unknown error occurred',\n  timestamp: new Date().toISOString()\n}) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Batch Analysis Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Batch Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Batch Input": {
+      "main": [
+        [
+          {
+            "node": "Split Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Batch": {
+      "main": [
+        [
+          {
+            "node": "Process Single Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Single Image": {
+      "main": [
+        [
+          {
+            "node": "AI Analysis Per Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Analysis Per Image": {
+      "main": [
+        [
+          {
+            "node": "Structure Individual Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structure Individual Result": {
+      "main": [
+        [
+          {
+            "node": "Collect Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Results": {
+      "main": [
+        [
+          {
+            "node": "Compile Batch Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Batch Report": {
+      "main": [
+        [
+          {
+            "node": "Send Batch Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Batch Results": {
+      "main": [
+        [
+          {
+            "node": "Batch Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": "global-error-handler"
+  },
+  "staticData": {},
+  "tags": [
+    {
+      "id": "agriculture-batch",
+      "name": "agriculture-batch"
+    }
+  ],
+  "triggerCount": 1,
+  "active": false,
+  "id": "2"
+}

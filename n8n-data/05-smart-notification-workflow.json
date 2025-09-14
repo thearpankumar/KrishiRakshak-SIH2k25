@@ -1,0 +1,468 @@
+{
+  "name": "Smart Notification System Workflow",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Notification Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [200, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-notification",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "http://localhost:8000"
+        }
+      },
+      "webhookId": "smart-notification"
+    },
+    {
+      "id": "2",
+      "name": "Validate Notification Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Validate notification request\nconst input = $input.first().json;\n\n// Check required fields\nif (!input.user_id || !input.notification_type || !input.message) {\n  throw new Error('Missing required fields: user_id, notification_type, message');\n}\n\n// Validate notification types\nconst validTypes = [\n  'weather_alert',\n  'market_update', \n  'crop_analysis_complete',\n  'community_message',\n  'system_alert',\n  'agricultural_tip',\n  'price_alert',\n  'seasonal_reminder'\n];\n\nif (!validTypes.includes(input.notification_type)) {\n  throw new Error(`Invalid notification_type. Must be one of: ${validTypes.join(', ')}`);\n}\n\n// Validate priority\nconst validPriorities = ['low', 'medium', 'high', 'urgent'];\nconst priority = input.priority || 'medium';\nif (!validPriorities.includes(priority)) {\n  throw new Error(`Invalid priority. Must be one of: ${validPriorities.join(', ')}`);\n}\n\nreturn {\n  json: {\n    ...input,\n    notification_id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,\n    priority: priority,\n    requested_at: new Date().toISOString(),\n    validated: true\n  }\n};"
+      }
+    },
+    {
+      "id": "3",
+      "name": "Get User Preferences",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [600, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "=http://localhost:8000/api/v1/users/{{ $json.user_id }}/notification-preferences",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Internal-Request",
+              "value": "n8n-notification"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000,
+          "retry": {
+            "enabled": true,
+            "maxRetries": 3,
+            "waitBetweenRetries": 1000
+          }
+        }
+      }
+    },
+    {
+      "id": "4",
+      "name": "Enhance Message with AI",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [800, 300],
+      "parameters": {
+        "resource": "assistant",
+        "operation": "message",
+        "message": "=Enhance this {{ $('Validate Notification Request').first().json.notification_type }} notification for Kerala farmers:\n\nOriginal Message: \"{{ $('Validate Notification Request').first().json.message }}\"\nUser Language Preference: {{ $('Get User Preferences').first().json.language || 'malayalam' }}\nUser Crops: {{ ($('Get User Preferences').first().json.crops_grown || []).join(', ') }}\nUser Location: {{ $('Get User Preferences').first().json.location || 'Kerala' }}\n\nRequirements:\n1. Respond in the user's preferred language ({{ $('Get User Preferences').first().json.language || 'malayalam' }})\n2. Make it relevant to their crops and location\n3. Keep it concise but informative (max 200 characters for push notifications)\n4. Add actionable advice when appropriate\n5. Use appropriate tone for the notification type\n\nProvide JSON response with:\n- enhanced_message: The improved notification text\n- short_message: Shortened version for push notifications (max 100 chars)\n- action_button: Suggested action button text (if applicable)\n- urgency_level: Assessed urgency (low/medium/high/critical)",
+        "options": {
+          "model": "gpt-4o-mini",
+          "maxTokens": 300,
+          "temperature": 0.3
+        }
+      },
+      "credentials": {
+        "openAiApi": "openai-credentials"
+      }
+    },
+    {
+      "id": "5",
+      "name": "Process Enhanced Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Process AI-enhanced notification\nconst originalData = $('Validate Notification Request').first().json;\nconst userPrefs = $('Get User Preferences').first().json;\nconst aiResponse = $input.first().json;\n\nlet enhancedNotification;\ntry {\n  const content = aiResponse.choices?.[0]?.message?.content || aiResponse.content || aiResponse.text;\n  enhancedNotification = JSON.parse(content);\n} catch (e) {\n  // Fallback enhancement\n  enhancedNotification = {\n    enhanced_message: originalData.message,\n    short_message: originalData.message.substring(0, 100),\n    action_button: getDefaultActionButton(originalData.notification_type),\n    urgency_level: originalData.priority === 'urgent' ? 'critical' : originalData.priority\n  };\n}\n\n// Determine delivery channels based on preferences and urgency\nconst deliveryChannels = determineDeliveryChannels(userPrefs, enhancedNotification.urgency_level, originalData.notification_type);\n\n// Calculate optimal delivery time\nconst deliveryTime = calculateDeliveryTime(userPrefs, originalData.notification_type, enhancedNotification.urgency_level);\n\nconst processedNotification = {\n  notification_id: originalData.notification_id,\n  user_id: originalData.user_id,\n  notification_type: originalData.notification_type,\n  \n  content: {\n    original_message: originalData.message,\n    enhanced_message: enhancedNotification.enhanced_message,\n    short_message: enhancedNotification.short_message,\n    action_button: enhancedNotification.action_button,\n    language: userPrefs.language || 'malayalam'\n  },\n  \n  delivery: {\n    channels: deliveryChannels,\n    scheduled_time: deliveryTime,\n    urgency_level: enhancedNotification.urgency_level,\n    retry_count: 0,\n    max_retries: getMaxRetries(enhancedNotification.urgency_level)\n  },\n  \n  targeting: {\n    user_location: userPrefs.location || originalData.location,\n    user_crops: userPrefs.crops_grown || [],\n    farming_experience: userPrefs.farming_experience,\n    preferred_time: userPrefs.notification_time || '08:00'\n  },\n  \n  tracking: {\n    created_at: originalData.requested_at,\n    processed_at: new Date().toISOString(),\n    status: 'ready_to_send'\n  }\n};\n\nfunction getDefaultActionButton(notificationType) {\n  const actionMap = {\n    'weather_alert': 'View Details',\n    'market_update': 'Check Prices', \n    'crop_analysis_complete': 'View Results',\n    'community_message': 'Read Message',\n    'system_alert': 'Learn More',\n    'agricultural_tip': 'Get Tips',\n    'price_alert': 'View Prices',\n    'seasonal_reminder': 'Plan Activities'\n  };\n  return actionMap[notificationType] || 'Open App';\n}\n\nfunction determineDeliveryChannels(prefs, urgency, type) {\n  const channels = [];\n  \n  // Always include push notifications\n  if (prefs.push_notifications !== false) {\n    channels.push('push');\n  }\n  \n  // Add SMS for urgent notifications\n  if (urgency === 'critical' || urgency === 'high') {\n    if (prefs.sms_notifications !== false) {\n      channels.push('sms');\n    }\n  }\n  \n  // Add email for detailed notifications\n  if (['market_update', 'agricultural_tip'].includes(type)) {\n    if (prefs.email_notifications !== false) {\n      channels.push('email');\n    }\n  }\n  \n  // Add in-app notification\n  channels.push('in_app');\n  \n  return channels;\n}\n\nfunction calculateDeliveryTime(prefs, type, urgency) {\n  const now = new Date();\n  \n  // Immediate delivery for urgent notifications\n  if (urgency === 'critical') {\n    return now.toISOString();\n  }\n  \n  // Respect user's preferred notification time for non-urgent notifications\n  if (urgency === 'low' || urgency === 'medium') {\n    const preferredTime = prefs.notification_time || '08:00';\n    const [hours, minutes] = preferredTime.split(':').map(Number);\n    \n    const tomorrow = new Date(now);\n    tomorrow.setDate(tomorrow.getDate() + 1);\n    tomorrow.setHours(hours, minutes, 0, 0);\n    \n    // If preferred time hasn't passed today, schedule for today\n    const today = new Date(now);\n    today.setHours(hours, minutes, 0, 0);\n    \n    if (today > now) {\n      return today.toISOString();\n    } else {\n      return tomorrow.toISOString();\n    }\n  }\n  \n  // Default: send within next hour for medium-high urgency\n  const deliveryTime = new Date(now.getTime() + (60 * 60 * 1000));\n  return deliveryTime.toISOString();\n}\n\nfunction getMaxRetries(urgency) {\n  const retryMap = {\n    'low': 1,\n    'medium': 2,\n    'high': 3,\n    'critical': 5\n  };\n  return retryMap[urgency] || 2;\n}\n\nreturn { json: processedNotification };"
+      }
+    },
+    {
+      "id": "6",
+      "name": "Route by Urgency",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1200, 300],
+      "parameters": {
+        "options": {
+          "allMatchingOutputs": false
+        },
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "critical_urgent",
+              "leftValue": "={{ $json.delivery.urgency_level }}",
+              "rightValue": "critical",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "high_priority",
+              "leftValue": "={{ $json.delivery.urgency_level }}",
+              "rightValue": "high",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "fallbackOutput": 2
+      }
+    },
+    {
+      "id": "7",
+      "name": "Send Immediate Critical",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 100],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/v1/notifications/send-immediate",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Priority",
+              "value": "critical"
+            },
+            {
+              "name": "X-Workflow-Source",
+              "value": "n8n-notification"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonParameters": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 15000,
+          "retry": {
+            "enabled": true,
+            "maxRetries": 5,
+            "waitBetweenRetries": 1000
+          }
+        }
+      }
+    },
+    {
+      "id": "8",
+      "name": "Send High Priority",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 250],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/v1/notifications/send-priority",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Priority",
+              "value": "high"
+            },
+            {
+              "name": "X-Workflow-Source",
+              "value": "n8n-notification"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonParameters": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 15000,
+          "retry": {
+            "enabled": true,
+            "maxRetries": 3,
+            "waitBetweenRetries": 2000
+          }
+        }
+      }
+    },
+    {
+      "id": "9",
+      "name": "Schedule Regular Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/v1/notifications/schedule",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Scheduled-Time",
+              "value": "={{ $json.delivery.scheduled_time }}"
+            },
+            {
+              "name": "X-Workflow-Source",
+              "value": "n8n-notification"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonParameters": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "10",
+      "name": "Track Delivery Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1600, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Track notification delivery and create response\nconst notificationData = $('Process Enhanced Message').first().json;\nconst deliveryResponse = $input.first().json;\n\nconst deliveryStatus = {\n  notification_id: notificationData.notification_id,\n  user_id: notificationData.user_id,\n  \n  delivery_summary: {\n    status: deliveryResponse.success ? 'delivered' : 'failed',\n    channels_used: notificationData.delivery.channels,\n    delivered_at: new Date().toISOString(),\n    urgency_level: notificationData.delivery.urgency_level\n  },\n  \n  message_info: {\n    notification_type: notificationData.notification_type,\n    language: notificationData.content.language,\n    message_length: notificationData.content.enhanced_message.length,\n    has_action_button: Boolean(notificationData.content.action_button)\n  },\n  \n  user_targeting: {\n    location: notificationData.targeting.user_location,\n    crops: notificationData.targeting.user_crops,\n    farming_experience: notificationData.targeting.farming_experience\n  },\n  \n  performance_metrics: {\n    processing_time_ms: new Date() - new Date(notificationData.tracking.created_at),\n    ai_enhanced: true,\n    delivery_method: getDeliveryMethod(notificationData.delivery.urgency_level),\n    scheduled: notificationData.delivery.scheduled_time !== new Date().toISOString()\n  }\n};\n\nfunction getDeliveryMethod(urgency) {\n  if (urgency === 'critical') return 'immediate';\n  if (urgency === 'high') return 'priority';\n  return 'scheduled';\n}\n\nreturn { json: deliveryStatus };"
+      }
+    },
+    {
+      "id": "11",
+      "name": "Log Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1800, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/v1/webhooks/notification-delivered",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Log-Type",
+              "value": "notification-tracking"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonParameters": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "12",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [2000, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: 'success',\n  notification_id: $json.notification_id,\n  delivery_status: $json.delivery_summary.status,\n  channels_used: $json.delivery_summary.channels_used,\n  urgency_level: $json.delivery_summary.urgency_level,\n  delivered_at: $json.delivery_summary.delivered_at,\n  processing_time_ms: $json.performance_metrics.processing_time_ms,\n  ai_enhanced: $json.performance_metrics.ai_enhanced\n}) }}"
+      }
+    },
+    {
+      "id": "13",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1000, 500],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: 'error',\n  message: 'Notification delivery failed',\n  notification_id: $json.notification_id || 'unknown',\n  error: $json.error?.message || $json.message || 'Unknown error occurred',\n  timestamp: new Date().toISOString()\n}) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Notification Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate Notification Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Notification Request": {
+      "main": [
+        [
+          {
+            "node": "Get User Preferences",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get User Preferences": {
+      "main": [
+        [
+          {
+            "node": "Enhance Message with AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enhance Message with AI": {
+      "main": [
+        [
+          {
+            "node": "Process Enhanced Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Enhanced Message": {
+      "main": [
+        [
+          {
+            "node": "Route by Urgency",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Urgency": {
+      "main": [
+        [
+          {
+            "node": "Send Immediate Critical",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send High Priority",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Schedule Regular Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Immediate Critical": {
+      "main": [
+        [
+          {
+            "node": "Track Delivery Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send High Priority": {
+      "main": [
+        [
+          {
+            "node": "Track Delivery Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Regular Notification": {
+      "main": [
+        [
+          {
+            "node": "Track Delivery Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Track Delivery Status": {
+      "main": [
+        [
+          {
+            "node": "Log Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Notification": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": {},
+  "tags": [
+    {
+      "createdAt": "2025-01-15T00:00:00.000Z",
+      "updatedAt": "2025-01-15T00:00:00.000Z",
+      "id": "smart-notifications",
+      "name": "smart-notifications"
+    }
+  ],
+  "triggerCount": 1,
+  "active": false,
+  "id": "5"
+}

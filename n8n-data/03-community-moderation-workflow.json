@@ -1,0 +1,385 @@
+{
+  "name": "Community Content Moderation Workflow",
+  "nodes": [
+    {
+      "id": "1",
+      "name": "Content Moderation Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [200, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "moderate-content",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "http://localhost:8000"
+        }
+      },
+      "webhookId": "content-moderation-webhook"
+    },
+    {
+      "id": "2",
+      "name": "Validate Content Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Validate content moderation input\nconst input = $input.first().json;\n\n// Check required fields\nif (!input.content || !input.content_type || !input.user_id) {\n  throw new Error('Missing required fields: content, content_type, user_id');\n}\n\n// Validate content type\nconst validTypes = ['group_message', 'group_post', 'chat_message', 'user_profile', 'image_description'];\nif (!validTypes.includes(input.content_type)) {\n  throw new Error(`Invalid content_type. Must be one of: ${validTypes.join(', ')}`);\n}\n\n// Basic content validation\nif (typeof input.content !== 'string' || input.content.trim().length === 0) {\n  throw new Error('Content cannot be empty');\n}\n\nif (input.content.length > 10000) {\n  throw new Error('Content exceeds maximum length of 10000 characters');\n}\n\nreturn {\n  json: {\n    ...input,\n    moderation_id: `mod_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,\n    content_length: input.content.length,\n    submitted_at: new Date().toISOString(),\n    validated: true\n  }\n};"
+      }
+    },
+    {
+      "id": "3",
+      "name": "AI Content Analysis",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [600, 300],
+      "parameters": {
+        "resource": "moderation",
+        "operation": "check",
+        "text": "={{ $json.content }}",
+        "options": {
+          "model": "text-moderation-latest"
+        }
+      },
+      "credentials": {
+        "openAiApi": "openai-credentials"
+      }
+    },
+    {
+      "id": "4",
+      "name": "Agricultural Context Check",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [800, 300],
+      "parameters": {
+        "resource": "assistant",
+        "operation": "message",
+        "message": "=Analyze this {{ $('Validate Content Input').first().json.content_type }} content for agricultural community guidelines:\n\nContent: \"{{ $('Validate Content Input').first().json.content }}\"\n\nEvaluate:\n1. Agricultural Relevance: Is it related to farming/agriculture? (relevant/partially_relevant/off_topic)\n2. Helpful vs Harmful: Does it help or mislead farmers? (helpful/neutral/misleading/harmful)\n3. Language Quality: Professional and respectful? (appropriate/minor_issues/inappropriate)\n4. Spam/Commercial: Is it spam or unwanted promotion? (clean/promotional/spam)\n5. Safety Level: Any dangerous agricultural advice? (safe/caution_needed/dangerous)\n6. Community Guidelines: Follows Kerala agricultural community norms? (compliant/minor_violation/major_violation)\n\nProvide JSON response with scores (0-1) and specific reasoning for agricultural context.",
+        "options": {
+          "model": "gpt-4o-mini",
+          "maxTokens": 400,
+          "temperature": 0.1
+        }
+      },
+      "credentials": {
+        "openAiApi": "openai-credentials"
+      }
+    },
+    {
+      "id": "5",
+      "name": "Process Moderation Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 300],
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "// Process combined moderation results\nconst originalInput = $('Validate Content Input').first().json;\nconst openaiModeration = $('AI Content Analysis').first().json;\nconst contextualAnalysis = $('Agricultural Context Check').first().json;\n\n// Parse OpenAI moderation results\nconst moderationResult = openaiModeration.results?.[0] || openaiModeration;\n\n// Parse contextual analysis\nlet contextAnalysis;\ntry {\n  const content = contextualAnalysis.choices?.[0]?.message?.content || contextualAnalysis.content || contextualAnalysis.text;\n  contextAnalysis = JSON.parse(content);\n} catch (e) {\n  // Fallback analysis\n  contextAnalysis = {\n    agricultural_relevance: 'relevant',\n    helpful_vs_harmful: 'neutral',\n    language_quality: 'appropriate',\n    spam_commercial: 'clean',\n    safety_level: 'safe',\n    community_guidelines: 'compliant'\n  };\n}\n\n// Calculate overall moderation decision\nconst openaiFlags = moderationResult.flagged || false;\nconst contextualRisk = \n  contextAnalysis.helpful_vs_harmful === 'harmful' ||\n  contextAnalysis.helpful_vs_harmful === 'misleading' ||\n  contextAnalysis.language_quality === 'inappropriate' ||\n  contextAnalysis.spam_commercial === 'spam' ||\n  contextAnalysis.safety_level === 'dangerous' ||\n  contextAnalysis.community_guidelines === 'major_violation';\n\nconst moderateRisk = \n  contextAnalysis.agricultural_relevance === 'off_topic' ||\n  contextAnalysis.language_quality === 'minor_issues' ||\n  contextAnalysis.spam_commercial === 'promotional' ||\n  contextAnalysis.safety_level === 'caution_needed' ||\n  contextAnalysis.community_guidelines === 'minor_violation';\n\n// Determine action\nlet action, reason, confidence;\nif (openaiFlags) {\n  action = 'reject';\n  reason = `Content flagged by OpenAI: ${Object.keys(moderationResult.categories || {}).filter(key => moderationResult.categories[key]).join(', ')}`;\n  confidence = 0.95;\n} else if (contextualRisk) {\n  action = 'reject';\n  reason = 'Content violates agricultural community guidelines or safety standards';\n  confidence = 0.85;\n} else if (moderateRisk) {\n  action = 'review';\n  reason = 'Content requires human review for community standards';\n  confidence = 0.70;\n} else {\n  action = 'approve';\n  reason = 'Content meets community guidelines and safety standards';\n  confidence = 0.90;\n}\n\nconst moderationResponse = {\n  moderation_id: originalInput.moderation_id,\n  user_id: originalInput.user_id,\n  content_type: originalInput.content_type,\n  content_length: originalInput.content_length,\n  moderation_result: {\n    action: action, // approve, review, reject\n    reason: reason,\n    confidence: confidence,\n    automated: action !== 'review'\n  },\n  openai_moderation: {\n    flagged: moderationResult.flagged || false,\n    categories: moderationResult.categories || {},\n    category_scores: moderationResult.category_scores || {}\n  },\n  contextual_analysis: contextAnalysis,\n  processing_details: {\n    processed_at: new Date().toISOString(),\n    model_used: 'gpt-4o-mini + text-moderation-latest',\n    workflow_version: '1.0'\n  },\n  status: 'completed'\n};\n\nreturn { json: moderationResponse };"
+      }
+    },
+    {
+      "id": "6",
+      "name": "Route Based on Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1200, 300],
+      "parameters": {
+        "options": {
+          "allMatchingOutputs": false
+        },
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "approve_condition",
+              "leftValue": "={{ $json.moderation_result.action }}",
+              "rightValue": "approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "review_condition",
+              "leftValue": "={{ $json.moderation_result.action }}",
+              "rightValue": "review",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "reject_condition",
+              "leftValue": "={{ $json.moderation_result.action }}",
+              "rightValue": "reject",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "fallbackOutput": 3
+      }
+    },
+    {
+      "id": "7",
+      "name": "Send Moderation Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/v1/webhooks/community-moderation",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Workflow-Source",
+              "value": "n8n-content-moderation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonParameters": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 15000,
+          "retry": {
+            "enabled": true,
+            "maxRetries": 3,
+            "waitBetweenRetries": 1000
+          }
+        }
+      }
+    },
+    {
+      "id": "8",
+      "name": "Queue for Human Review",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/v1/webhooks/content-review-queue",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Review-Priority",
+              "value": "={{ $json.moderation_result.confidence < 0.6 ? 'high' : 'normal' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonParameters": "={{ JSON.stringify({\n  ...($json),\n  review_queue: {\n    priority: $json.moderation_result.confidence < 0.6 ? 'high' : 'normal',\n    assigned_to: null,\n    queued_at: new Date().toISOString()\n  }\n}) }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "9",
+      "name": "Log Rejected Content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/api/v1/webhooks/content-rejected",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Violation-Level",
+              "value": "={{ $json.openai_moderation.flagged ? 'severe' : 'moderate' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonParameters": "={{ JSON.stringify({\n  ...($json),\n  rejection_details: {\n    violation_level: $json.openai_moderation.flagged ? 'severe' : 'moderate',\n    flagged_categories: Object.keys($json.openai_moderation.categories || {}).filter(key => $json.openai_moderation.categories[key]),\n    rejected_at: new Date().toISOString()\n  }\n}) }}",
+        "options": {
+          "timeout": 15000
+        }
+      }
+    },
+    {
+      "id": "10",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1600, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: 'success',\n  moderation_id: $json.moderation_id,\n  action: $json.moderation_result.action,\n  reason: $json.moderation_result.reason,\n  confidence: $json.moderation_result.confidence,\n  automated: $json.moderation_result.automated,\n  processed_at: $json.processing_details.processed_at\n}) }}"
+      }
+    },
+    {
+      "id": "11",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [800, 500],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  status: 'error',\n  message: 'Content moderation failed',\n  moderation_id: $json.moderation_id || 'unknown',\n  error: $json.error?.message || $json.message || 'Unknown error occurred',\n  timestamp: new Date().toISOString()\n}) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Content Moderation Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Content Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Content Input": {
+      "main": [
+        [
+          {
+            "node": "AI Content Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Content Analysis": {
+      "main": [
+        [
+          {
+            "node": "Agricultural Context Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agricultural Context Check": {
+      "main": [
+        [
+          {
+            "node": "Process Moderation Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Moderation Results": {
+      "main": [
+        [
+          {
+            "node": "Route Based on Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Based on Action": {
+      "main": [
+        [
+          {
+            "node": "Send Moderation Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue for Human Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Rejected Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Moderation Result": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue for Human Review": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Rejected Content": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": {},
+  "tags": [
+    {
+      "createdAt": "2025-01-15T00:00:00.000Z",
+      "updatedAt": "2025-01-15T00:00:00.000Z",
+      "id": "community-moderation",
+      "name": "community-moderation"
+    }
+  ],
+  "triggerCount": 1,
+  "active": false,
+  "id": "3"
+}
