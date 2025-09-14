@@ -5,6 +5,7 @@ import asyncio
 from typing import Dict, Any, List, Optional
 import uuid
 import os
+import json
 from datetime import datetime
 
 from ..core.database import get_session
@@ -16,9 +17,10 @@ router = APIRouter()
 
 async def call_n8n_webhook(webhook_path: str, data: Dict[Any, Any], timeout: float = 30.0):
     """Helper function to call N8N webhooks"""
-    webhook_url = f"{settings.n8n_webhook_base_url}/{webhook_path}"
+    # Use direct container communication to bypass Traefik routing issues
+    webhook_url = f"http://n8n:5678/webhook/{webhook_path}"
 
-    print(f"🔗 N8N Webhook URL: {webhook_url}")
+    print(f"🔗 N8N Webhook URL (direct): {webhook_url}")
     print(f"📤 Data being sent to N8N:")
     print(f"   Raw data: {data}")
     print(f"   Data type: {type(data)}")
@@ -34,7 +36,22 @@ async def call_n8n_webhook(webhook_path: str, data: Dict[Any, Any], timeout: flo
 
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.post(webhook_url, json=data, timeout=timeout)
+            # Add debugging headers and ensure proper JSON content type
+            headers = {
+                'Content-Type': 'application/json',
+                'User-Agent': 'FastAPI-N8N-Integration/1.0',
+                'X-Forwarded-For': '127.0.0.1'
+            }
+
+            print(f"📋 Request headers: {headers}")
+            print(f"📋 Request JSON: {json.dumps(data, indent=2)}")
+
+            response = await client.post(
+                webhook_url,
+                json=data,
+                headers=headers,
+                timeout=timeout
+            )
             print(f"📡 N8N Response Status: {response.status_code}")
             print(f"📡 N8N Response Headers: {response.headers}")
 
@@ -285,12 +302,33 @@ async def trigger_knowledge_processing(
 async def check_n8n_connectivity():
     """Check N8N connectivity and workflow status"""
     try:
-        # Test basic connectivity
+        # Test direct container communication
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.n8n_webhook_base_url}/health-check", timeout=10.0)
+            # First test basic N8N health
+            response = await client.get("http://n8n:5678/healthz", timeout=10.0)
+            direct_health = response.status_code == 200
+
+            # Test webhook endpoint directly
+            test_data = {
+                "user_id": "test-user",
+                "image_path": "/tmp/test.jpg",
+                "analysis_type": "crop",
+                "test": True
+            }
+
+            webhook_response = await client.post(
+                "http://n8n:5678/webhook/image-analysis",
+                json=test_data,
+                timeout=10.0
+            )
+
             return {
-                "status": "connected",
-                "n8n_status": response.status_code,
+                "status": "connected" if direct_health else "partial",
+                "direct_n8n_health": direct_health,
+                "webhook_test": {
+                    "status_code": webhook_response.status_code,
+                    "response": webhook_response.text[:200] if webhook_response.text else "Empty response"
+                },
                 "timestamp": datetime.utcnow().isoformat()
             }
     except Exception as e:
