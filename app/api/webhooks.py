@@ -15,12 +15,16 @@ router = APIRouter()
 @router.post("/image-analysis")
 async def receive_image_analysis_result(
     data: Dict[Any, Any],
-    x_workflow_source: Optional[str] = Header(None),
+    x_workflow_source: Optional[str] = Header(None, alias="X-Workflow-Source"),
     session: AsyncSession = Depends(get_session)
 ):
     """Receive enhanced image analysis results from N8N"""
 
+    print(f"📥 Received webhook data: {data}")
+    print(f"📥 Workflow source header: {x_workflow_source}")
+
     if x_workflow_source != "n8n-image-analysis":
+        print(f"⚠️ Invalid workflow source: {x_workflow_source}")
         raise HTTPException(status_code=401, detail="Invalid workflow source")
 
     try:
