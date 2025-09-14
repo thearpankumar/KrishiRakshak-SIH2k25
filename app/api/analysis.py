@@ -89,12 +89,19 @@ async def upload_and_trigger_analysis(
             "user_id": str(current_user.id),
             "image_path": file_path,
             "analysis_type": analysis_type,
-            "filename": file.filename,
-            "user_location": current_user.location,
-            "user_latitude": current_user.latitude,
-            "user_longitude": current_user.longitude,
+            "filename": file.filename or "unknown.jpg",
+            "user_location": current_user.location or "Unknown",
+            "user_latitude": current_user.latitude or 0.0,
+            "user_longitude": current_user.longitude or 0.0,
             "timestamp": datetime.utcnow().isoformat()
         }
+
+        # Validate required fields before sending to N8N
+        required_fields = ['user_id', 'image_path', 'analysis_type']
+        for field in required_fields:
+            if not enhanced_data.get(field):
+                print(f"❌ ERROR: Required field '{field}' is missing or empty")
+                raise Exception(f"Required field '{field}' is missing for N8N workflow")
 
         print(f"🔍 Enhanced data for N8N: {enhanced_data}")
         print(f"👤 Current user: ID={current_user.id}, Location={current_user.location}")

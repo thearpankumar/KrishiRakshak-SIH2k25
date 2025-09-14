@@ -19,7 +19,18 @@ async def call_n8n_webhook(webhook_path: str, data: Dict[Any, Any], timeout: flo
     webhook_url = f"{settings.n8n_webhook_base_url}/{webhook_path}"
 
     print(f"🔗 N8N Webhook URL: {webhook_url}")
-    print(f"📤 Data being sent to N8N: {data}")
+    print(f"📤 Data being sent to N8N:")
+    print(f"   Raw data: {data}")
+    print(f"   Data type: {type(data)}")
+    print(f"   Keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+
+    # Ensure all required fields are present
+    required_fields = ['user_id', 'image_path', 'analysis_type']
+    missing_fields = [field for field in required_fields if field not in data or data[field] is None]
+    if missing_fields:
+        print(f"⚠️ Missing fields in data: {missing_fields}")
+    else:
+        print(f"✅ All required fields present: {required_fields}")
 
     async with httpx.AsyncClient() as client:
         try:
