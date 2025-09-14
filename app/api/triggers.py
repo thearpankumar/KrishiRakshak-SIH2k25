@@ -39,8 +39,7 @@ async def call_n8n_webhook(webhook_path: str, data: Dict[Any, Any], timeout: flo
             # Add debugging headers and ensure proper JSON content type
             headers = {
                 'Content-Type': 'application/json',
-                'User-Agent': 'FastAPI-N8N-Integration/1.0',
-                'X-Forwarded-For': '127.0.0.1'
+                'User-Agent': 'FastAPI-N8N-Integration/1.0'
             }
 
             print(f"📋 Request headers: {headers}")
