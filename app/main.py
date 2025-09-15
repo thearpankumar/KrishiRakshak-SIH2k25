@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 import os
 
 from .core.config import settings
-from .core.database import create_tables
+from .core.database import create_tables, Session, engine
 from .services.vector_service import vector_service
 
 
