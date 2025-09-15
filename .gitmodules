@@ -1,3 +1,6 @@
 [submodule "krishiRakshak"]
 	path = krishiRakshak
 	url = https://github.com/codiphile/krishiRakshak.git
+[submodule "Krishi-Officer-Homepage"]
+	path = Krishi-Officer-Homepage
+	url = https://github.com/Harigithub11/Krishi-Officer-Homepage.git
